@@ -47,3 +47,5 @@ app.*.map.json
 # Local Firebase/runtime configuration
 config/firebase.*.json
 !config/firebase.example.json
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist
