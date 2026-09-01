@@ -1,0 +1,23 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isCompanyMember(companyId) {
+      return signedIn()
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && companyId in firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.companyIds;
+    }
+
+    match /companies/{companyId}/{allPaths=**} {
+      allow read, write: if isCompanyMember(companyId);
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
