@@ -8,59 +8,22 @@ class DefaultFirebaseOptions {
   static const _notConfigured = 'not-configured';
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: String.fromEnvironment(
-      'FIREBASE_WEB_API_KEY',
-      defaultValue: _notConfigured,
-    ),
-    appId: String.fromEnvironment(
-      'FIREBASE_WEB_APP_ID',
-      defaultValue: _notConfigured,
-    ),
-    messagingSenderId: String.fromEnvironment(
-      'FIREBASE_MESSAGING_SENDER_ID',
-      defaultValue: _notConfigured,
-    ),
-    projectId: String.fromEnvironment(
-      'FIREBASE_PROJECT_ID',
-      defaultValue: _notConfigured,
-    ),
-    authDomain: String.fromEnvironment(
-      'FIREBASE_AUTH_DOMAIN',
-      defaultValue: _notConfigured,
-    ),
-    storageBucket: String.fromEnvironment(
-      'FIREBASE_STORAGE_BUCKET',
-      defaultValue: _notConfigured,
-    ),
-    measurementId: String.fromEnvironment(
-      'FIREBASE_MEASUREMENT_ID',
-      defaultValue: _notConfigured,
-    ),
+    apiKey: 'AIzaSyC2uc8yz7MeM0l10GZhndOB32vYx-XJ7F8',
+    appId: '1:242571980105:web:69d8bbcce3312a512a3e98',
+    messagingSenderId: '242571980105',
+    projectId: 'myestoquecontroller',
+    authDomain: 'myestoquecontroller.firebaseapp.com',
+    storageBucket: 'myestoquecontroller.firebasestorage.app',
+    measurementId: 'G-PN0NHDS7SW',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: String.fromEnvironment(
-      'FIREBASE_ANDROID_API_KEY',
-      defaultValue: _notConfigured,
-    ),
-    appId: String.fromEnvironment(
-      'FIREBASE_ANDROID_APP_ID',
-      defaultValue: _notConfigured,
-    ),
-    messagingSenderId: String.fromEnvironment(
-      'FIREBASE_MESSAGING_SENDER_ID',
-      defaultValue: _notConfigured,
-    ),
-    projectId: String.fromEnvironment(
-      'FIREBASE_PROJECT_ID',
-      defaultValue: _notConfigured,
-    ),
-    storageBucket: String.fromEnvironment(
-      'FIREBASE_STORAGE_BUCKET',
-      defaultValue: _notConfigured,
-    ),
+    apiKey: 'AIzaSyBkIJ7Tu8R08eX4hVvJ5k8kPwPBhY4ckqE',
+    appId: '1:242571980105:android:24c3b2ffa48ab2f92a3e98',
+    messagingSenderId: '242571980105',
+    projectId: 'myestoquecontroller',
+    storageBucket: 'myestoquecontroller.firebasestorage.app',
   );
-
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
       return web;

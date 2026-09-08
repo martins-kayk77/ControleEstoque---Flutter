@@ -2,16 +2,41 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../screens/dashboard_page.dart';
-import '../../screens/inventory_placeholder_page.dart';
-import '../../screens/login_page.dart';
-import '../../screens/pricing_page.dart';
-import '../../screens/settings_page.dart';
+import '../../features/auth/application/auth_state.dart';
+import '../../screens/tela_acesso.dart';
+import '../../screens/tela_configuracoes.dart';
+import '../../screens/tela_painel.dart';
+import '../../screens/tela_precos.dart';
+import '../../screens/telas_estoque.dart';
 import '../../shared/widgets/app_shell.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
-  return GoRouter(
+  final authState = ref.watch(authStateProvider);
+  final authFlow = ref.watch(authFlowProvider);
+  final router = GoRouter(
     initialLocation: DashboardPage.routePath,
+    redirect: (context, state) {
+      final isLoginRoute = state.uri.path == LoginPage.routePath;
+      final isAuthenticated = authState.asData?.value != null;
+
+      if (authFlow != AuthFlow.idle) {
+        return isLoginRoute ? null : LoginPage.routePath;
+      }
+
+      if (!isAuthenticated && !isLoginRoute) {
+        final from = Uri.encodeComponent(state.uri.toString());
+        return '${LoginPage.routePath}?from=$from';
+      }
+
+      if (isAuthenticated && isLoginRoute) {
+        final from = state.uri.queryParameters['from'];
+        return from == null || from.isEmpty
+            ? DashboardPage.routePath
+            : Uri.decodeComponent(from);
+      }
+
+      return null;
+    },
     routes: [
       ShellRoute(
         builder: (context, state, child) {
@@ -59,4 +84,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     errorBuilder: (context, state) =>
         const Scaffold(body: Center(child: Text('Página não encontrada'))),
   );
+
+  ref.onDispose(router.dispose);
+
+  return router;
 });

@@ -10,14 +10,92 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
+    function cpfRegistryDocument(cpf) {
+      return /databases/$(database)/documents/cpfRegistry/$(cpf);
+    }
+
+    function validCpfRegistryCreate(cpf) {
+      return signedIn()
+        && request.resource.data.keys().hasOnly(['cpf', 'userId', 'createdAt'])
+        && request.resource.data.cpf == cpf
+        && request.resource.data.cpf.matches('^[0-9]{11}$')
+        && request.resource.data.userId == request.auth.uid;
+    }
+
+    function validCpfRegistryLookup(cpf) {
+      return cpf.matches('^[0-9]{11}$')
+        || cpf.matches('^[0-9]{3}\\.[0-9]{3}\\.[0-9]{3}-[0-9]{2}$');
+    }
+
+    function cpfBelongsToSignedInUser(cpf) {
+      return signedIn()
+        && getAfter(cpfRegistryDocument(cpf)).data.userId == request.auth.uid;
+    }
+
+    function validUserProfileData() {
+      return request.resource.data.keys().hasAll([
+          'email',
+          'displayName',
+          'cpf',
+          'birthDate',
+          'companyIds',
+          'activeCompanyId',
+          'createdAt',
+          'updatedAt',
+        ])
+        && request.resource.data.keys().hasOnly([
+          'email',
+          'displayName',
+          'cpf',
+          'birthDate',
+          'companyIds',
+          'activeCompanyId',
+          'createdAt',
+          'updatedAt',
+        ])
+        && request.resource.data.email is string
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() > 0
+        && request.resource.data.cpf is string
+        && request.resource.data.cpf.matches('^[0-9]{11}$')
+        && request.resource.data.birthDate is timestamp
+        && request.resource.data.companyIds is list
+        && (
+          request.resource.data.activeCompanyId == null ||
+          request.resource.data.activeCompanyId is string
+        );
+    }
+
+    function userIdentityWasNotChanged() {
+      return request.resource.data.email == resource.data.email
+        && request.resource.data.cpf == resource.data.cpf
+        && request.resource.data.birthDate == resource.data.birthDate
+        && request.resource.data.createdAt == resource.data.createdAt;
+    }
+
     function isCompanyMember(companyId) {
       return signedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
         && companyId in userDocument().data.companyIds;
     }
 
+    match /cpfRegistry/{cpf} {
+      allow get: if validCpfRegistryLookup(cpf);
+      allow list: if false;
+      allow create: if validCpfRegistryCreate(cpf);
+      allow update, delete: if false;
+    }
+
     match /users/{userId} {
-      allow read, create, update: if signedIn() && request.auth.uid == userId;
+      allow read: if signedIn() && request.auth.uid == userId;
+      allow create: if signedIn()
+        && request.auth.uid == userId
+        && validUserProfileData()
+        && cpfBelongsToSignedInUser(request.resource.data.cpf);
+      allow update: if signedIn()
+        && request.auth.uid == userId
+        && validUserProfileData()
+        && userIdentityWasNotChanged();
       allow delete: if false;
     }
 

@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('abre o dashboard provisório', (tester) async {
+  testWidgets('abre a tela de login sem usuário autenticado', (tester) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
@@ -15,9 +15,10 @@ void main() {
         child: const InventoryApp(),
       ),
     );
+    await tester.pumpAndSettle();
 
-    expect(find.text('Dashboard'), findsWidgets);
-    expect(find.text('Produtos'), findsWidgets);
+    expect(find.text('Entrar'), findsWidgets);
     expect(find.text('Firebase pendente'), findsOneWidget);
+    expect(find.text('Dashboard'), findsNothing);
   });
 }
