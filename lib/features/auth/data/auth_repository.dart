@@ -7,10 +7,6 @@ import '../../../core/firebase/firestore_paths.dart';
 import '../../../core/firebase/firestore_serialization.dart';
 import '../domain/app_user.dart';
 
-class DuplicateCpfException implements Exception {
-  const DuplicateCpfException();
-}
-
 class UserProfileCreationException implements Exception {
   const UserProfileCreationException(this.error);
 
@@ -142,7 +138,6 @@ class FirebaseAuthRepository implements AuthRepository {
     }
 
     try {
-      await _assertCpfIsAvailable(cpf);
       await _writeNewUserProfile(
         user,
         displayName: displayName,
@@ -152,10 +147,6 @@ class FirebaseAuthRepository implements AuthRepository {
       await _firestore.waitForPendingWrites();
 
       return await _buildAppUser(user);
-    } on DuplicateCpfException {
-      await _discardCreatedUser(user);
-
-      rethrow;
     } on FirebaseException catch (error) {
       await _discardCreatedUser(user);
 
@@ -191,8 +182,6 @@ class FirebaseAuthRepository implements AuthRepository {
     final companyIds = _readCompanyIds(data);
     final activeCompanyId = _readActiveCompanyId(data, companyIds);
 
-    await _tryEnsureCpfRegistry(user.uid, readString(data, 'cpf'));
-
     return AppUser(
       id: user.uid,
       email: user.email ?? readString(data, 'email'),
@@ -213,35 +202,6 @@ class FirebaseAuthRepository implements AuthRepository {
         data['birthDate'] != null;
   }
 
-  Future<void> _tryEnsureCpfRegistry(String userId, String cpf) async {
-    try {
-      final cpfReference = _firestore.doc(FirestorePaths.cpfRegistry(cpf));
-      final cpfDocument = await cpfReference.get();
-
-      if (!cpfDocument.exists) {
-        await cpfReference.set({
-          'cpf': cpf,
-          'userId': userId,
-          'createdAt': FieldValue.serverTimestamp(),
-        });
-      }
-    } on FirebaseException {
-      return;
-    }
-  }
-
-  Future<void> _assertCpfIsAvailable(String cpf) async {
-    for (final cpfReference in _cpfRegistryLookupReferences(cpf)) {
-      final cpfDocument = await cpfReference.get(
-        const GetOptions(source: Source.server),
-      );
-
-      if (cpfDocument.exists) {
-        throw const DuplicateCpfException();
-      }
-    }
-  }
-
   Future<void> _writeNewUserProfile(
     User user, {
     required String displayName,
@@ -249,64 +209,27 @@ class FirebaseAuthRepository implements AuthRepository {
     required DateTime birthDate,
   }) async {
     final userReference = _firestore.doc(FirestorePaths.user(user.uid));
-    final cpfReference = _firestore.doc(FirestorePaths.cpfRegistry(cpf));
-    final cpfLookupReferences = _cpfRegistryLookupReferences(cpf);
 
     await _firestore.runTransaction((transaction) async {
-      final cpfDocuments = <DocumentSnapshot<Map<String, dynamic>>>[];
-      for (final cpfLookupReference in cpfLookupReferences) {
-        cpfDocuments.add(await transaction.get(cpfLookupReference));
-      }
       final userDocument = await transaction.get(userReference);
-
-      if (cpfDocuments.any((document) => document.exists)) {
-        throw const DuplicateCpfException();
-      }
 
       if (userDocument.exists) {
         throw StateError('user-profile-already-exists');
       }
 
-      transaction
-        ..set(cpfReference, {
-          'cpf': cpf,
-          'userId': user.uid,
-          'createdAt': FieldValue.serverTimestamp(),
-        })
-        ..set(userReference, {
-          'email': user.email ?? '',
-          'displayName': displayName,
-          'cpf': cpf,
-          'birthDate': Timestamp.fromDate(
-            DateTime(birthDate.year, birthDate.month, birthDate.day),
-          ),
-          'companyIds': <String>[],
-          'activeCompanyId': null,
-          'createdAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
+      transaction.set(userReference, {
+        'email': user.email ?? '',
+        'displayName': displayName,
+        'cpf': cpf,
+        'birthDate': Timestamp.fromDate(
+          DateTime(birthDate.year, birthDate.month, birthDate.day),
+        ),
+        'companyIds': <String>[],
+        'activeCompanyId': null,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
     });
-  }
-
-  List<DocumentReference<Map<String, dynamic>>> _cpfRegistryLookupReferences(
-    String cpf,
-  ) {
-    final formattedCpf = _formatCpfForLookup(cpf);
-    final paths = <String>{
-      FirestorePaths.cpfRegistry(cpf),
-      if (formattedCpf != cpf) FirestorePaths.cpfRegistry(formattedCpf),
-    };
-
-    return paths.map(_firestore.doc).toList(growable: false);
-  }
-
-  String _formatCpfForLookup(String cpf) {
-    if (cpf.length != 11) {
-      return cpf;
-    }
-
-    return '${cpf.substring(0, 3)}.${cpf.substring(3, 6)}.'
-        '${cpf.substring(6, 9)}-${cpf.substring(9)}';
   }
 
   Future<void> _discardCreatedUser(User user) async {

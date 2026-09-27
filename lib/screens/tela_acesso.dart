@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,8 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/bootstrap/firebase_bootstrap.dart';
 import '../app/theme/app_theme.dart';
-import '../core/firebase/firebase_providers.dart';
-import '../core/firebase/firestore_paths.dart';
+import '../features/auth/application/auth_rate_limiter.dart';
 import '../features/auth/application/auth_state.dart';
 import '../features/auth/application/registration_validators.dart';
 import '../features/auth/data/auth_repository.dart';
@@ -37,8 +35,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   bool _isSubmitting = false;
   bool _obscurePassword = true;
   bool _obscurePasswordConfirmation = true;
-  String? _cpfAvailabilityError;
-  String? _cpfAvailabilityErrorCpf;
+  String? _emailAvailabilityError;
+  String? _emailAvailabilityErrorEmail;
+  String? _submissionError;
 
   @override
   void dispose() {
@@ -56,10 +55,18 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   Widget build(BuildContext context) {
     final bootstrap = ref.watch(firebaseBootstrapProvider);
     final authState = ref.watch(authStateProvider);
+    final rateLimit = ref.watch(authRateLimitProvider);
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final isCheckingSession = authState.isLoading;
-    final canSubmit = bootstrap.isReady && !_isSubmitting && !isCheckingSession;
+    final canInteract =
+        bootstrap.isReady && !_isSubmitting && !isCheckingSession;
+    final isCurrentModeBlocked = _isCreatingAccount
+        ? rateLimit.isSignupBlocked
+        : rateLimit.isLoginBlocked;
+    final canSubmit = canInteract && !isCurrentModeBlocked;
+    final canSendPasswordReset =
+        canInteract && !rateLimit.isPasswordResetCoolingDown;
 
     return Scaffold(
       body: SafeArea(
@@ -111,10 +118,52 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           const LinearProgressIndicator(minHeight: 3),
                           const SizedBox(height: 16),
                         ],
+                        if (!_isCreatingAccount &&
+                            rateLimit.isLoginBlocked) ...[
+                          _LoginNotice(
+                            icon: Icons.timer_outlined,
+                            title: 'Login temporariamente bloqueado',
+                            message:
+                                'Muitas tentativas de login. Aguarde ${rateLimit.loginSecondsRemaining} segundos para tentar novamente.',
+                            color: AppTheme.warning,
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+                        if (_isCreatingAccount &&
+                            rateLimit.isSignupBlocked) ...[
+                          _LoginNotice(
+                            icon: Icons.timer_outlined,
+                            title: 'Cadastros temporariamente bloqueados',
+                            message:
+                                'Muitas tentativas de cadastro. Tente novamente em ${_formatRemainingTime(rateLimit.signupSecondsRemaining)}.',
+                            color: AppTheme.warning,
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+                        if (!_isCreatingAccount &&
+                            rateLimit.isPasswordResetCoolingDown) ...[
+                          _LoginNotice(
+                            icon: Icons.mark_email_read_outlined,
+                            title: 'Recuperação solicitada',
+                            message:
+                                'Você poderá solicitar outro e-mail em ${rateLimit.passwordResetSecondsRemaining}s.',
+                            color: colorScheme.primary,
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+                        if (_submissionError != null) ...[
+                          _LoginNotice(
+                            icon: Icons.error_outline,
+                            title: 'Não foi possível criar a conta',
+                            message: _submissionError!,
+                            color: colorScheme.error,
+                          ),
+                          const SizedBox(height: 16),
+                        ],
                         if (_isCreatingAccount) ...[
                           TextFormField(
                             controller: _nameController,
-                            enabled: canSubmit,
+                            enabled: canInteract,
                             keyboardType: TextInputType.name,
                             textInputAction: TextInputAction.next,
                             autofillHints: const [AutofillHints.name],
@@ -127,11 +176,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           const SizedBox(height: 12),
                           TextFormField(
                             controller: _cpfController,
-                            enabled: canSubmit,
+                            enabled: canInteract,
                             keyboardType: TextInputType.number,
                             textInputAction: TextInputAction.next,
                             inputFormatters: const [_CpfInputFormatter()],
-                            onChanged: (_) => _clearCpfAvailabilityError(),
                             decoration: const InputDecoration(
                               labelText: 'CPF',
                               hintText: '000.000.000-00',
@@ -142,7 +190,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           const SizedBox(height: 12),
                           TextFormField(
                             controller: _birthDateController,
-                            enabled: canSubmit,
+                            enabled: canInteract,
                             keyboardType: TextInputType.number,
                             textInputAction: TextInputAction.next,
                             inputFormatters: const [_BirthDateInputFormatter()],
@@ -152,7 +200,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                               prefixIcon: const Icon(Icons.cake_outlined),
                               suffixIcon: IconButton(
                                 tooltip: 'Selecionar data',
-                                onPressed: canSubmit ? _pickBirthDate : null,
+                                onPressed: canInteract ? _pickBirthDate : null,
                                 icon: const Icon(Icons.calendar_month_outlined),
                               ),
                             ),
@@ -162,10 +210,11 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         ],
                         TextFormField(
                           controller: _emailController,
-                          enabled: canSubmit,
+                          enabled: canInteract,
                           keyboardType: TextInputType.emailAddress,
                           textInputAction: TextInputAction.next,
                           autofillHints: const [AutofillHints.email],
+                          onChanged: (_) => _clearEmailAvailabilityError(),
                           decoration: const InputDecoration(
                             labelText: 'E-mail',
                             hintText: 'seunome@gmail.com',
@@ -177,7 +226,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           const SizedBox(height: 12),
                           TextFormField(
                             controller: _emailConfirmationController,
-                            enabled: canSubmit,
+                            enabled: canInteract,
                             keyboardType: TextInputType.emailAddress,
                             textInputAction: TextInputAction.next,
                             decoration: const InputDecoration(
@@ -191,7 +240,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         const SizedBox(height: 12),
                         TextFormField(
                           controller: _passwordController,
-                          enabled: canSubmit,
+                          enabled: canInteract,
                           obscureText: _obscurePassword,
                           textInputAction: _isCreatingAccount
                               ? TextInputAction.next
@@ -211,7 +260,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                               tooltip: _obscurePassword
                                   ? 'Mostrar senha'
                                   : 'Ocultar senha',
-                              onPressed: canSubmit
+                              onPressed: canInteract
                                   ? () {
                                       setState(() {
                                         _obscurePassword = !_obscurePassword;
@@ -235,7 +284,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           const SizedBox(height: 12),
                           TextFormField(
                             controller: _passwordConfirmationController,
-                            enabled: canSubmit,
+                            enabled: canInteract,
                             obscureText: _obscurePasswordConfirmation,
                             textInputAction: TextInputAction.done,
                             autofillHints: const [AutofillHints.newPassword],
@@ -246,7 +295,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                                 tooltip: _obscurePasswordConfirmation
                                     ? 'Mostrar senha'
                                     : 'Ocultar senha',
-                                onPressed: canSubmit
+                                onPressed: canInteract
                                     ? () {
                                         setState(() {
                                           _obscurePasswordConfirmation =
@@ -271,8 +320,14 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                           Align(
                             alignment: Alignment.centerRight,
                             child: TextButton(
-                              onPressed: canSubmit ? _sendPasswordReset : null,
-                              child: const Text('Esqueci minha senha'),
+                              onPressed: canSendPasswordReset
+                                  ? _sendPasswordReset
+                                  : null,
+                              child: Text(
+                                rateLimit.isPasswordResetCoolingDown
+                                    ? 'Solicitar novamente em ${rateLimit.passwordResetSecondsRemaining}s'
+                                    : 'Esqueci minha senha',
+                              ),
                             ),
                           ),
                         const SizedBox(height: 8),
@@ -290,13 +345,11 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                                       ? Icons.person_add_alt_1_outlined
                                       : Icons.login,
                                 ),
-                          label: Text(
-                            _isCreatingAccount ? 'Criar conta' : 'Entrar',
-                          ),
+                          label: Text(_submitButtonLabel(rateLimit)),
                         ),
                         const SizedBox(height: 12),
                         OutlinedButton.icon(
-                          onPressed: canSubmit ? _toggleMode : null,
+                          onPressed: canInteract ? _toggleMode : null,
                           icon: Icon(
                             _isCreatingAccount
                                 ? Icons.login
@@ -371,12 +424,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       return 'Informe um CPF válido.';
     }
 
-    final normalizedCpf = digitsOnly(cpf);
-    if (_cpfAvailabilityError != null &&
-        _cpfAvailabilityErrorCpf == normalizedCpf) {
-      return _cpfAvailabilityError;
-    }
-
     return null;
   }
 
@@ -405,18 +452,28 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       return 'Use um e-mail que termine com @gmail.com.';
     }
 
+    final normalizedEmail = email.toLowerCase();
+    if (_isCreatingAccount &&
+        _emailAvailabilityError != null &&
+        _emailAvailabilityErrorEmail == normalizedEmail) {
+      return _emailAvailabilityError;
+    }
+
     return null;
   }
 
   String? _validateEmailConfirmation(String? value) {
-    final emailError = _validateEmail(value);
+    final email = value?.trim() ?? '';
 
-    if (emailError != null) {
-      return emailError;
+    if (email.isEmpty) {
+      return 'Confirme seu e-mail.';
     }
 
-    if (value!.trim().toLowerCase() !=
-        _emailController.text.trim().toLowerCase()) {
+    if (!isGmailAddress(email)) {
+      return 'Use um e-mail que termine com @gmail.com.';
+    }
+
+    if (email.toLowerCase() != _emailController.text.trim().toLowerCase()) {
       return 'Os e-mails não conferem.';
     }
 
@@ -451,47 +508,37 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     return null;
   }
 
-  Future<bool> _cpfJaEstaReservadoNoBanco(String cpf) async {
-    final firestore = ref.read(firebaseFirestoreProvider);
-
-    for (final path in _cpfRegistryLookupPaths(cpf)) {
-      final cpfDocument = await firestore
-          .doc(path)
-          .get(const GetOptions(source: Source.server));
-
-      if (cpfDocument.exists) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  Set<String> _cpfRegistryLookupPaths(String cpf) {
-    final formattedCpf = _formatCpfForLookup(cpf);
-
-    return {
-      FirestorePaths.cpfRegistry(cpf),
-      if (formattedCpf != cpf) FirestorePaths.cpfRegistry(formattedCpf),
-    };
-  }
-
-  String _formatCpfForLookup(String cpf) {
-    if (cpf.length != 11) {
-      return cpf;
-    }
-
-    return '${cpf.substring(0, 3)}.${cpf.substring(3, 6)}.'
-        '${cpf.substring(6, 9)}-${cpf.substring(9)}';
-  }
-
   Future<void> _submit() async {
+    if (_isCreatingAccount) {
+      _clearStaleEmailAvailabilityError();
+    }
+
     if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    final isCreatingAccount = _isCreatingAccount;
+    final rateLimitController = ref.read(authRateLimitProvider.notifier);
+
+    if (isCreatingAccount) {
+      if (!rateLimitController.tryStartSignupAttempt()) {
+        final seconds = ref.read(authRateLimitProvider).signupSecondsRemaining;
+        _showSnackBar(
+          'Muitas tentativas de cadastro. Tente novamente em ${_formatRemainingTime(seconds)}.',
+        );
+        return;
+      }
+    } else if (!rateLimitController.canAttemptLogin()) {
+      final seconds = ref.read(authRateLimitProvider).loginSecondsRemaining;
+      _showSnackBar(
+        'Muitas tentativas de login. Aguarde $seconds segundos para tentar novamente.',
+      );
       return;
     }
 
     setState(() {
       _isSubmitting = true;
+      _submissionError = null;
     });
 
     final authFlowController = ref.read(authFlowProvider.notifier);
@@ -501,15 +548,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       final email = _emailController.text.trim().toLowerCase();
       final password = _passwordController.text;
 
-      if (_isCreatingAccount) {
+      if (isCreatingAccount) {
         final cpf = digitsOnly(_cpfController.text);
         authFlowController.set(AuthFlow.creatingAccount);
-
-        if (await _cpfJaEstaReservadoNoBanco(cpf)) {
-          authFlowController.set(AuthFlow.idle);
-          _markCpfAsAlreadyRegistered(cpf);
-          return;
-        }
 
         await repository.createUserWithEmailAndPassword(
           displayName: _nameController.text.trim(),
@@ -535,33 +576,49 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       } else {
         authFlowController.set(AuthFlow.idle);
         await repository.signInWithEmailAndPassword(email, password);
+        rateLimitController.resetLoginAttempts();
       }
 
       TextInput.finishAutofillContext();
-    } on DuplicateCpfException {
-      _resetAuthFlowAfterFailure(authFlowController);
-      _markCpfAsAlreadyRegistered(digitsOnly(_cpfController.text));
     } on UserProfileCreationException catch (error) {
       _resetAuthFlowAfterFailure(authFlowController);
       _showSnackBar(_userProfileCreationErrorMessage(error));
     } on MissingUserProfileException {
       _resetAuthFlowAfterFailure(authFlowController);
+      if (!isCreatingAccount) {
+        rateLimitController.resetLoginAttempts();
+      }
       _showSnackBar(
         'Este usuário está sem cadastro completo no Firestore. Apague o teste e cadastre novamente pelo app.',
       );
     } on UserProfileReadException catch (error) {
       _resetAuthFlowAfterFailure(authFlowController);
+      if (!isCreatingAccount) {
+        rateLimitController.resetLoginAttempts();
+      }
       _showSnackBar(_userProfileReadErrorMessage(error));
     } on FirebaseAuthException catch (error) {
       _resetAuthFlowAfterFailure(authFlowController);
-      _showSnackBar(_authErrorMessage(error));
+      if (isCreatingAccount && _isEmailAlreadyInUse(error)) {
+        _markEmailAsAlreadyRegistered(
+          _emailController.text.trim().toLowerCase(),
+        );
+      } else if (!isCreatingAccount && _isInvalidLoginCredential(error)) {
+        final isBlocked = rateLimitController.recordInvalidLoginAttempt();
+        if (isBlocked) {
+          final seconds = ref.read(authRateLimitProvider).loginSecondsRemaining;
+          _showSnackBar(
+            'Muitas tentativas de login. Aguarde $seconds segundos para tentar novamente.',
+          );
+        } else {
+          _showSnackBar(_authErrorMessage(error));
+        }
+      } else {
+        _showSnackBar(_authErrorMessage(error));
+      }
     } on FirebaseException catch (error) {
       _resetAuthFlowAfterFailure(authFlowController);
-      if (_isCreatingAccount && error.code == 'permission-denied') {
-        _markCpfLookupUnavailable(digitsOnly(_cpfController.text));
-      } else {
-        _showSnackBar(_firebaseErrorMessage(error));
-      }
+      _showSnackBar(_firebaseErrorMessage(error));
     } catch (_) {
       _resetAuthFlowAfterFailure(authFlowController);
       _showSnackBar('Não foi possível autenticar agora.');
@@ -586,6 +643,15 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       return;
     }
 
+    final rateLimitController = ref.read(authRateLimitProvider.notifier);
+    if (!rateLimitController.canSendPasswordReset()) {
+      final seconds = ref
+          .read(authRateLimitProvider)
+          .passwordResetSecondsRemaining;
+      _showSnackBar('Você poderá solicitar outro e-mail em ${seconds}s.');
+      return;
+    }
+
     setState(() {
       _isSubmitting = true;
     });
@@ -594,9 +660,12 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       await ref
           .read(authRepositoryProvider)
           .sendPasswordResetEmail(_emailController.text.trim().toLowerCase());
-      _showSnackBar('Enviamos um e-mail para redefinir sua senha.');
+      rateLimitController.startPasswordResetCooldown();
+      _showSnackBar(
+        'Se houver uma conta para este e-mail, enviaremos as instruções de recuperação.',
+      );
     } on FirebaseAuthException catch (error) {
-      _showSnackBar(_authErrorMessage(error));
+      _showSnackBar(_passwordResetErrorMessage(error));
     } catch (_) {
       _showSnackBar('Não foi possível enviar a recuperação de senha.');
     } finally {
@@ -632,48 +701,94 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   void _toggleMode() {
     setState(() {
       _isCreatingAccount = !_isCreatingAccount;
-      _cpfAvailabilityError = null;
-      _cpfAvailabilityErrorCpf = null;
+      _emailAvailabilityError = null;
+      _emailAvailabilityErrorEmail = null;
+      _submissionError = null;
       _formKey.currentState?.reset();
     });
     ref.read(authFlowProvider.notifier).set(AuthFlow.idle);
   }
 
-  void _clearCpfAvailabilityError() {
-    if (_cpfAvailabilityError == null) {
+  void _clearEmailAvailabilityError() {
+    if (_emailAvailabilityError == null && _submissionError == null) {
       return;
     }
 
     setState(() {
-      _cpfAvailabilityError = null;
-      _cpfAvailabilityErrorCpf = null;
+      _emailAvailabilityError = null;
+      _emailAvailabilityErrorEmail = null;
+      _submissionError = null;
     });
   }
 
-  void _markCpfAsAlreadyRegistered(String cpf) {
-    if (mounted) {
-      setState(() {
-        _cpfAvailabilityError = 'Este CPF já está vinculado a outra conta.';
-        _cpfAvailabilityErrorCpf = cpf;
-      });
-      _formKey.currentState?.validate();
+  void _clearStaleEmailAvailabilityError() {
+    final currentEmail = _emailController.text.trim().toLowerCase();
+
+    if (_emailAvailabilityErrorEmail == null ||
+        _emailAvailabilityErrorEmail == currentEmail) {
+      return;
     }
 
-    _showSnackBar('Este CPF já está vinculado a outra conta.');
+    setState(() {
+      _emailAvailabilityError = null;
+      _emailAvailabilityErrorEmail = null;
+      _submissionError = null;
+    });
   }
 
-  void _markCpfLookupUnavailable(String cpf) {
+  void _markEmailAsAlreadyRegistered(String email) {
     if (mounted) {
       setState(() {
-        _cpfAvailabilityError = 'Não foi possível consultar este CPF no banco.';
-        _cpfAvailabilityErrorCpf = cpf;
+        _emailAvailabilityError = 'Este e-mail já está cadastrado.';
+        _emailAvailabilityErrorEmail = email;
+        _submissionError =
+            'Já existe uma conta usando este e-mail. Informe outro e-mail ou volte para entrar.';
       });
       _formKey.currentState?.validate();
     }
 
-    _showSnackBar(
-      'Não foi possível consultar o CPF no banco. Confira as regras do Firestore.',
-    );
+    _showSnackBar('Este e-mail já está cadastrado.');
+  }
+
+  bool _isEmailAlreadyInUse(FirebaseAuthException error) {
+    final code = error.code
+        .toLowerCase()
+        .replaceFirst('auth/', '')
+        .replaceAll('_', '-');
+
+    return code == 'email-already-in-use';
+  }
+
+  bool _isInvalidLoginCredential(FirebaseAuthException error) {
+    final code = error.code.toLowerCase().replaceAll('_', '-');
+
+    return code == 'invalid-credential' ||
+        code == 'invalid-login-credentials' ||
+        code == 'wrong-password' ||
+        code == 'user-not-found';
+  }
+
+  String _submitButtonLabel(AuthRateLimitState rateLimit) {
+    if (_isCreatingAccount && rateLimit.isSignupBlocked) {
+      return 'Tente novamente em ${_formatRemainingTime(rateLimit.signupSecondsRemaining)}';
+    }
+
+    if (!_isCreatingAccount && rateLimit.isLoginBlocked) {
+      return 'Tente novamente em ${rateLimit.loginSecondsRemaining}s';
+    }
+
+    return _isCreatingAccount ? 'Criar conta' : 'Entrar';
+  }
+
+  String _formatRemainingTime(int totalSeconds) {
+    if (totalSeconds < 60) {
+      return '${totalSeconds}s';
+    }
+
+    final minutes = totalSeconds ~/ 60;
+    final seconds = totalSeconds % 60;
+
+    return seconds == 0 ? '${minutes}min' : '${minutes}min ${seconds}s';
   }
 
   void _showSnackBar(String message) {
@@ -698,14 +813,23 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       'too-many-requests' => 'Muitas tentativas. Tente novamente em instantes.',
       'weak-password' => 'Use uma senha mais forte.',
       'network-request-failed' => 'Sem conexão com o Firebase.',
-      _ => 'Erro de autenticação: ${error.code}.',
+      _ => 'Não foi possível autenticar agora.',
+    };
+  }
+
+  String _passwordResetErrorMessage(FirebaseAuthException error) {
+    return switch (error.code) {
+      'too-many-requests' => 'Muitas tentativas. Tente novamente em instantes.',
+      'network-request-failed' => 'Sem conexão com o Firebase.',
+      'invalid-email' => 'Informe um Gmail válido.',
+      _ =>
+        'Não foi possível solicitar a recuperação agora. Tente novamente em instantes.',
     };
   }
 
   String _firebaseErrorMessage(FirebaseException error) {
     return switch (error.code) {
-      'permission-denied' =>
-        'Não foi possível consultar o CPF no banco. Confira as regras do Firestore.',
+      'permission-denied' => 'Operação bloqueada pelas regras do Firestore.',
       'unavailable' => 'Firebase indisponível no momento.',
       _ => 'Erro Firebase: ${error.code}.',
     };

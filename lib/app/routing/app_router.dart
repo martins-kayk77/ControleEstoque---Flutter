@@ -11,11 +11,13 @@ import '../../screens/telas_estoque.dart';
 import '../../shared/widgets/app_shell.dart';
 
 final appRouterProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authStateProvider);
-  final authFlow = ref.watch(authFlowProvider);
-  final router = GoRouter(
+  late final GoRouter router;
+
+  router = GoRouter(
     initialLocation: DashboardPage.routePath,
     redirect: (context, state) {
+      final authState = ref.read(authStateProvider);
+      final authFlow = ref.read(authFlowProvider);
       final isLoginRoute = state.uri.path == LoginPage.routePath;
       final isAuthenticated = authState.asData?.value != null;
 
@@ -84,6 +86,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     errorBuilder: (context, state) =>
         const Scaffold(body: Center(child: Text('Página não encontrada'))),
   );
+
+  ref.listen(authStateProvider, (_, _) {
+    router.refresh();
+  });
+
+  ref.listen(authFlowProvider, (_, _) {
+    router.refresh();
+  });
 
   ref.onDispose(router.dispose);
 

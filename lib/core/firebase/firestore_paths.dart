@@ -3,7 +3,6 @@ class FirestoreCollections {
 
   static const companies = 'companies';
   static const users = 'users';
-  static const cpfRegistry = 'cpfRegistry';
   static const members = 'members';
   static const products = 'products';
   static const categories = 'categories';
@@ -18,10 +17,6 @@ class FirestorePaths {
   const FirestorePaths._();
 
   static String user(String userId) => '${FirestoreCollections.users}/$userId';
-
-  static String cpfRegistry(String cpf) {
-    return '${FirestoreCollections.cpfRegistry}/$cpf';
-  }
 
   static String company(String companyId) {
     return '${FirestoreCollections.companies}/$companyId';

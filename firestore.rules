@@ -10,28 +10,6 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid));
     }
 
-    function cpfRegistryDocument(cpf) {
-      return /databases/$(database)/documents/cpfRegistry/$(cpf);
-    }
-
-    function validCpfRegistryCreate(cpf) {
-      return signedIn()
-        && request.resource.data.keys().hasOnly(['cpf', 'userId', 'createdAt'])
-        && request.resource.data.cpf == cpf
-        && request.resource.data.cpf.matches('^[0-9]{11}$')
-        && request.resource.data.userId == request.auth.uid;
-    }
-
-    function validCpfRegistryLookup(cpf) {
-      return cpf.matches('^[0-9]{11}$')
-        || cpf.matches('^[0-9]{3}\\.[0-9]{3}\\.[0-9]{3}-[0-9]{2}$');
-    }
-
-    function cpfBelongsToSignedInUser(cpf) {
-      return signedIn()
-        && getAfter(cpfRegistryDocument(cpf)).data.userId == request.auth.uid;
-    }
-
     function validUserProfileData() {
       return request.resource.data.keys().hasAll([
           'email',
@@ -79,19 +57,11 @@ service cloud.firestore {
         && companyId in userDocument().data.companyIds;
     }
 
-    match /cpfRegistry/{cpf} {
-      allow get: if validCpfRegistryLookup(cpf);
-      allow list: if false;
-      allow create: if validCpfRegistryCreate(cpf);
-      allow update, delete: if false;
-    }
-
     match /users/{userId} {
       allow read: if signedIn() && request.auth.uid == userId;
       allow create: if signedIn()
         && request.auth.uid == userId
-        && validUserProfileData()
-        && cpfBelongsToSignedInUser(request.resource.data.cpf);
+        && validUserProfileData();
       allow update: if signedIn()
         && request.auth.uid == userId
         && validUserProfileData()
