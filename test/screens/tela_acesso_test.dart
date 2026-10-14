@@ -243,6 +243,9 @@ class _TestAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<void> reauthenticateWithPassword(String password) async {}
+
+  @override
   Future<AppUser> signInWithEmailAndPassword(String email, String password) {
     loginAttempts++;
     final errorCode = loginErrorCode;

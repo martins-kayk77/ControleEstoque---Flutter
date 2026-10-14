@@ -8,6 +8,7 @@ import '../domain/company.dart';
 
 abstract class CompanyRepository {
   Stream<Company?> watchCompany(String companyId);
+  Future<String> ensureDefaultCompany(String userId);
   Future<void> save(Company company);
 }
 
@@ -19,6 +20,56 @@ class FirestoreCompanyRepository implements CompanyRepository {
   const FirestoreCompanyRepository(this._firestore);
 
   final FirebaseFirestore _firestore;
+
+  @override
+  Future<String> ensureDefaultCompany(String userId) async {
+    final companyId = userId;
+    final userReference = _firestore.doc(FirestorePaths.user(userId));
+    final userSnapshot = await userReference.get(
+      const GetOptions(source: Source.server),
+    );
+    final userData = userSnapshot.data();
+    final companyIds = userData?['companyIds'];
+    final hasMembership =
+        companyIds is Iterable && companyIds.contains(companyId);
+    final hasActiveCompany = userData?['activeCompanyId'] == companyId;
+    var companyExists = false;
+
+    if (hasMembership) {
+      final companySnapshot = await _document(
+        companyId,
+      ).get(const GetOptions(source: Source.server));
+      companyExists = companySnapshot.exists;
+
+      if (companyExists && hasActiveCompany) {
+        return companyId;
+      }
+    }
+
+    final now = FieldValue.serverTimestamp();
+    final batch = _firestore.batch();
+
+    if (!companyExists) {
+      batch.set(_document(companyId), {
+        'name': 'Minha empresa',
+        'tradeName': '',
+        'documentNumber': '',
+        'createdBy': userId,
+        'isActive': true,
+        'createdAt': now,
+        'updatedAt': now,
+        'settings': <String, Object?>{},
+      }, SetOptions(merge: true));
+    }
+    batch.update(userReference, {
+      'companyIds': FieldValue.arrayUnion([companyId]),
+      'activeCompanyId': companyId,
+      'updatedAt': now,
+    });
+
+    await batch.commit();
+    return companyId;
+  }
 
   @override
   Stream<Company?> watchCompany(String companyId) {

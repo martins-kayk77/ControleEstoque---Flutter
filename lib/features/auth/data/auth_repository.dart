@@ -34,6 +34,7 @@ abstract class AuthRepository {
     required String email,
     required String password,
   });
+  Future<void> reauthenticateWithPassword(String password);
   Future<void> sendPasswordResetEmail(String email);
   Future<void> signOut();
 }
@@ -156,6 +157,22 @@ class FirebaseAuthRepository implements AuthRepository {
 
       throw UserProfileCreationException(error);
     }
+  }
+
+  @override
+  Future<void> reauthenticateWithPassword(String password) async {
+    final user = _auth.currentUser;
+    final email = user?.email;
+
+    if (user == null || email == null || email.isEmpty) {
+      throw FirebaseAuthException(code: 'user-not-found');
+    }
+
+    final credential = EmailAuthProvider.credential(
+      email: email,
+      password: password,
+    );
+    await user.reauthenticateWithCredential(credential);
   }
 
   @override

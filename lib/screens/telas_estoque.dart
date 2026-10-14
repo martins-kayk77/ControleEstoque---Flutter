@@ -3,42 +3,6 @@ import 'package:flutter/material.dart';
 import '../app/theme/app_theme.dart';
 import '../shared/widgets/page_container.dart';
 
-class ProductsPage extends StatelessWidget {
-  const ProductsPage({super.key});
-
-  static const routePath = '/products';
-  static const routeName = 'products';
-
-  @override
-  Widget build(BuildContext context) {
-    return const InventoryPlaceholderPage(
-      title: 'Produtos',
-      subtitle: 'Cadastro, consulta e organização do catálogo',
-      icon: Icons.inventory_2_outlined,
-      actionIcon: Icons.add_box_outlined,
-      primaryActionLabel: 'Novo produto',
-      accentColor: AppTheme.primaryBlue,
-      stats: [
-        PlaceholderStat('Ativos', '0', Icons.check_circle_outline),
-        PlaceholderStat('Estoque baixo', '0', Icons.warning_amber_outlined),
-        PlaceholderStat(
-          'Sem estoque',
-          '0',
-          Icons.remove_shopping_cart_outlined,
-        ),
-      ],
-      emptyTitle: 'Sem produtos cadastrados',
-      emptyDescription:
-          'A lista de produtos será a base para entradas, saídas, contagens e precificação.',
-      nextSteps: [
-        'Cadastrar produtos com custo, preço e estoque mínimo.',
-        'Vincular categorias criadas pela própria empresa.',
-        'Preparar campos futuros para lote, validade e variações.',
-      ],
-    );
-  }
-}
-
 class StockMovementsPage extends StatelessWidget {
   const StockMovementsPage({super.key});
 

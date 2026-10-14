@@ -8,8 +8,10 @@ import '../domain/product.dart';
 
 abstract class ProductRepository {
   Stream<List<Product>> watchProducts(String companyId);
+  String createId(String companyId);
   Future<Product?> findById(String companyId, String productId);
   Future<void> save(Product product);
+  Future<void> delete(String companyId, String productId);
   Future<void> setActive(String companyId, String productId, bool isActive);
 }
 
@@ -21,6 +23,11 @@ class FirestoreProductRepository implements ProductRepository {
   const FirestoreProductRepository(this._firestore);
 
   final FirebaseFirestore _firestore;
+
+  @override
+  String createId(String companyId) {
+    return _collection(companyId).doc().id;
+  }
 
   @override
   Stream<List<Product>> watchProducts(String companyId) {
@@ -46,6 +53,11 @@ class FirestoreProductRepository implements ProductRepository {
     return _collection(
       product.companyId,
     ).doc(product.id).set(_toFirestore(product));
+  }
+
+  @override
+  Future<void> delete(String companyId, String productId) {
+    return _collection(companyId).doc(productId).delete();
   }
 
   @override

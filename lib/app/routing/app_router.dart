@@ -7,6 +7,7 @@ import '../../screens/tela_acesso.dart';
 import '../../screens/tela_configuracoes.dart';
 import '../../screens/tela_painel.dart';
 import '../../screens/tela_precos.dart';
+import '../../screens/tela_produtos.dart';
 import '../../screens/telas_estoque.dart';
 import '../../shared/widgets/app_shell.dart';
 
