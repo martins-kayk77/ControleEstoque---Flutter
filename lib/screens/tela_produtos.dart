@@ -9,7 +9,9 @@ import '../features/auth/application/auth_state.dart';
 import '../features/auth/data/auth_repository.dart';
 import '../features/auth/domain/app_user.dart';
 import '../features/company/data/company_repository.dart';
+import '../features/inventory/data/category_repository.dart';
 import '../features/inventory/data/product_repository.dart';
+import '../features/inventory/domain/category.dart';
 import '../features/inventory/domain/product.dart';
 import '../shared/widgets/page_container.dart';
 
@@ -18,6 +20,13 @@ final productsProvider = StreamProvider.family<List<Product>, String>((
   companyId,
 ) {
   return ref.watch(productRepositoryProvider).watchProducts(companyId);
+});
+
+final categoriesProvider = StreamProvider.family<List<Category>, String>((
+  ref,
+  companyId,
+) {
+  return ref.watch(categoryRepositoryProvider).watchCategories(companyId);
 });
 
 class ProductsPage extends ConsumerStatefulWidget {
@@ -32,7 +41,7 @@ class ProductsPage extends ConsumerStatefulWidget {
 
 class _ProductsPageState extends ConsumerState<ProductsPage> {
   String _search = '';
-  _ProductFilter _filter = _ProductFilter.all;
+  _ProductFilters _filters = const _ProductFilters();
   _ProductSort _sort = _ProductSort.nameAscending;
   int _currentPage = 1;
   final GlobalKey _listKey = GlobalKey();
@@ -65,6 +74,13 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     final productsState = companyId == null
         ? const AsyncValue<List<Product>>.data([])
         : ref.watch(productsProvider(companyId));
+    final categoriesState = companyId == null
+        ? const AsyncValue<List<Category>>.data([])
+        : ref.watch(categoriesProvider(companyId));
+    final categories = categoriesState.maybeWhen(
+      data: (value) => value,
+      orElse: () => const <Category>[],
+    );
 
     return PageContainer(
       child: Column(
@@ -96,8 +112,9 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
             ),
             data: (products) => _ProductsContent(
               products: products,
+              categories: categories,
               search: _search,
-              filter: _filter,
+              filters: _filters,
               sort: _sort,
               currentPage: _currentPage,
               listKey: _listKey,
@@ -105,10 +122,11 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                 _search = value;
                 _currentPage = 1;
               }),
-              onFilterChanged: (value) => setState(() {
-                _filter = value;
+              onFiltersChanged: (value) => setState(() {
+                _filters = value;
                 _currentPage = 1;
               }),
+              onOpenFilters: () => _openFilters(categories),
               onSortChanged: (value) => setState(() {
                 _sort = value;
                 _currentPage = 1;
@@ -137,6 +155,23 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
         alignment: 0.05,
       );
     });
+  }
+
+  Future<void> _openFilters(List<Category> categories) async {
+    final result = await showDialog<_ProductFilters>(
+      context: context,
+      builder: (context) => _AdvancedProductFiltersDialog(
+        initialFilters: _filters,
+        categories: categories,
+      ),
+    );
+
+    if (result != null && mounted) {
+      setState(() {
+        _filters = result;
+        _currentPage = 1;
+      });
+    }
   }
 
   Future<void> _openProductForm(AppUser user, {Product? product}) async {
@@ -208,13 +243,15 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
 class _ProductsContent extends StatelessWidget {
   const _ProductsContent({
     required this.products,
+    required this.categories,
     required this.search,
-    required this.filter,
+    required this.filters,
     required this.sort,
     required this.currentPage,
     required this.listKey,
     required this.onSearchChanged,
-    required this.onFilterChanged,
+    required this.onFiltersChanged,
+    required this.onOpenFilters,
     required this.onSortChanged,
     required this.onPageChanged,
     required this.onCreate,
@@ -222,13 +259,15 @@ class _ProductsContent extends StatelessWidget {
   });
 
   final List<Product> products;
+  final List<Category> categories;
   final String search;
-  final _ProductFilter filter;
+  final _ProductFilters filters;
   final _ProductSort sort;
   final int currentPage;
   final GlobalKey listKey;
   final ValueChanged<String> onSearchChanged;
-  final ValueChanged<_ProductFilter> onFilterChanged;
+  final ValueChanged<_ProductFilters> onFiltersChanged;
+  final VoidCallback onOpenFilters;
   final ValueChanged<_ProductSort> onSortChanged;
   final ValueChanged<int> onPageChanged;
   final VoidCallback onCreate;
@@ -237,19 +276,49 @@ class _ProductsContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final normalizedSearch = search.trim().toLowerCase();
+    final categoryNames = {
+      for (final category in categories) category.id: category.name,
+    };
     final visibleProducts = products.where((product) {
+      final categoryName = _categoryName(product, categoryNames);
       final matchesSearch =
           normalizedSearch.isEmpty ||
           product.name.toLowerCase().contains(normalizedSearch) ||
           product.description.toLowerCase().contains(normalizedSearch) ||
-          product.supplier.toLowerCase().contains(normalizedSearch);
-      final matchesFilter = switch (filter) {
+          product.supplier.toLowerCase().contains(normalizedSearch) ||
+          categoryName.toLowerCase().contains(normalizedSearch);
+      final matchesStatus = switch (filters.status) {
         _ProductFilter.all => true,
         _ProductFilter.active => product.isActive,
         _ProductFilter.inactive => !product.isActive,
       };
+      final matchesCategory = switch (filters.categoryId) {
+        null => true,
+        _uncategorizedCategoryFilter =>
+          product.categoryId == null || product.categoryId!.isEmpty,
+        final categoryId => product.categoryId == categoryId,
+      };
+      final matchesMinimumAcquisition =
+          filters.minimumAcquisition == null ||
+          product.acquisitionCost >= filters.minimumAcquisition!;
+      final matchesMaximumAcquisition =
+          filters.maximumAcquisition == null ||
+          product.acquisitionCost <= filters.maximumAcquisition!;
+      final matchesStock = switch (filters.stock) {
+        _StockFilter.all => true,
+        _StockFilter.outOfStock => product.currentStock <= 0,
+        _StockFilter.lowStock =>
+          product.currentStock > 0 && product.isBelowMinimum,
+        _StockFilter.aboveMinimum =>
+          product.currentStock > product.minimumStock,
+      };
 
-      return matchesSearch && matchesFilter;
+      return matchesSearch &&
+          matchesStatus &&
+          matchesCategory &&
+          matchesMinimumAcquisition &&
+          matchesMaximumAcquisition &&
+          matchesStock;
     }).toList()..sort((first, second) => _compareProducts(first, second, sort));
     final pageCount = (visibleProducts.length / _productsPerPage).ceil();
     final safePage = visibleProducts.isEmpty
@@ -268,12 +337,20 @@ class _ProductsContent extends StatelessWidget {
         const SizedBox(height: 20),
         _ProductToolbar(
           search: search,
-          filter: filter,
+          activeFilterCount: filters.activeCount,
           sort: sort,
           onSearchChanged: onSearchChanged,
-          onFilterChanged: onFilterChanged,
+          onOpenFilters: onOpenFilters,
           onSortChanged: onSortChanged,
         ),
+        if (filters.hasActiveFilters) ...[
+          const SizedBox(height: 10),
+          _ActiveProductFilters(
+            filters: filters,
+            categoryNames: categoryNames,
+            onChanged: onFiltersChanged,
+          ),
+        ],
         const SizedBox(height: 12),
         if (products.isEmpty)
           _EmptyProducts(onCreate: onCreate)
@@ -288,11 +365,16 @@ class _ProductsContent extends StatelessWidget {
             key: listKey,
             child: Column(
               children: [
-                _ProductList(products: pageProducts, onEdit: onEdit),
+                _ProductList(
+                  products: pageProducts,
+                  categoryNames: categoryNames,
+                  onEdit: onEdit,
+                ),
                 const SizedBox(height: 10),
                 _ProductPagination(
                   currentPage: safePage,
                   pageCount: pageCount,
+                  productCount: visibleProducts.length,
                   onPageChanged: onPageChanged,
                 ),
               ],
@@ -404,18 +486,18 @@ class _StatTile extends StatelessWidget {
 class _ProductToolbar extends StatelessWidget {
   const _ProductToolbar({
     required this.search,
-    required this.filter,
+    required this.activeFilterCount,
     required this.sort,
     required this.onSearchChanged,
-    required this.onFilterChanged,
+    required this.onOpenFilters,
     required this.onSortChanged,
   });
 
   final String search;
-  final _ProductFilter filter;
+  final int activeFilterCount;
   final _ProductSort sort;
   final ValueChanged<String> onSearchChanged;
-  final ValueChanged<_ProductFilter> onFilterChanged;
+  final VoidCallback onOpenFilters;
   final ValueChanged<_ProductSort> onSortChanged;
 
   @override
@@ -430,29 +512,18 @@ class _ProductToolbar extends StatelessWidget {
             prefixIcon: Icon(Icons.search),
           ),
         );
-        final filterField = DropdownButtonFormField<_ProductFilter>(
-          value: filter,
-          isExpanded: true,
-          decoration: const InputDecoration(
-            labelText: 'Status',
-            prefixIcon: Icon(Icons.filter_list),
+        final filterButton = SizedBox(
+          width: double.infinity,
+          height: 56,
+          child: OutlinedButton.icon(
+            onPressed: onOpenFilters,
+            icon: const Icon(Icons.filter_alt_outlined),
+            label: Text(
+              activeFilterCount == 0
+                  ? 'Filtros'
+                  : 'Filtros ($activeFilterCount)',
+            ),
           ),
-          items: const [
-            DropdownMenuItem(value: _ProductFilter.all, child: Text('Todos')),
-            DropdownMenuItem(
-              value: _ProductFilter.active,
-              child: Text('Ativos'),
-            ),
-            DropdownMenuItem(
-              value: _ProductFilter.inactive,
-              child: Text('Inativos'),
-            ),
-          ],
-          onChanged: (value) {
-            if (value != null) {
-              onFilterChanged(value);
-            }
-          },
         );
         final sortField = DropdownButtonFormField<_ProductSort>(
           value: sort,
@@ -520,7 +591,7 @@ class _ProductToolbar extends StatelessWidget {
             children: [
               searchField,
               const SizedBox(height: 12),
-              filterField,
+              filterButton,
               const SizedBox(height: 12),
               sortField,
             ],
@@ -531,7 +602,7 @@ class _ProductToolbar extends StatelessWidget {
           children: [
             Expanded(child: searchField),
             const SizedBox(width: 12),
-            SizedBox(width: 170, child: filterField),
+            SizedBox(width: 150, child: filterButton),
             const SizedBox(width: 12),
             SizedBox(width: 250, child: sortField),
           ],
@@ -543,7 +614,442 @@ class _ProductToolbar extends StatelessWidget {
 
 enum _ProductFilter { all, active, inactive }
 
-const _productsPerPage = 14;
+enum _StockFilter { all, outOfStock, lowStock, aboveMinimum }
+
+const _uncategorizedCategoryFilter = '__uncategorized__';
+
+class _ProductFilters {
+  const _ProductFilters({
+    this.status = _ProductFilter.all,
+    this.categoryId,
+    this.minimumAcquisition,
+    this.maximumAcquisition,
+    this.stock = _StockFilter.all,
+  });
+
+  final _ProductFilter status;
+  final String? categoryId;
+  final double? minimumAcquisition;
+  final double? maximumAcquisition;
+  final _StockFilter stock;
+
+  bool get hasActiveFilters => activeCount > 0;
+
+  int get activeCount {
+    var count = 0;
+    if (status != _ProductFilter.all) count++;
+    if (categoryId != null) count++;
+    if (minimumAcquisition != null || maximumAcquisition != null) count++;
+    if (stock != _StockFilter.all) count++;
+    return count;
+  }
+
+  _ProductFilters withStatus(_ProductFilter value) {
+    return _ProductFilters(
+      status: value,
+      categoryId: categoryId,
+      minimumAcquisition: minimumAcquisition,
+      maximumAcquisition: maximumAcquisition,
+      stock: stock,
+    );
+  }
+
+  _ProductFilters withCategory(String? value) {
+    return _ProductFilters(
+      status: status,
+      categoryId: value,
+      minimumAcquisition: minimumAcquisition,
+      maximumAcquisition: maximumAcquisition,
+      stock: stock,
+    );
+  }
+
+  _ProductFilters withAcquisition(double? minimum, double? maximum) {
+    return _ProductFilters(
+      status: status,
+      categoryId: categoryId,
+      minimumAcquisition: minimum,
+      maximumAcquisition: maximum,
+      stock: stock,
+    );
+  }
+
+  _ProductFilters withStock(_StockFilter value) {
+    return _ProductFilters(
+      status: status,
+      categoryId: categoryId,
+      minimumAcquisition: minimumAcquisition,
+      maximumAcquisition: maximumAcquisition,
+      stock: value,
+    );
+  }
+}
+
+class _ActiveProductFilters extends StatelessWidget {
+  const _ActiveProductFilters({
+    required this.filters,
+    required this.categoryNames,
+    required this.onChanged,
+  });
+
+  final _ProductFilters filters;
+  final Map<String, String> categoryNames;
+  final ValueChanged<_ProductFilters> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (filters.status != _ProductFilter.all)
+          InputChip(
+            label: Text(
+              filters.status == _ProductFilter.active
+                  ? 'Status: ativos'
+                  : 'Status: inativos',
+            ),
+            onDeleted: () => onChanged(filters.withStatus(_ProductFilter.all)),
+          ),
+        if (filters.categoryId != null)
+          InputChip(
+            label: Text(
+              filters.categoryId == _uncategorizedCategoryFilter
+                  ? 'Categoria: sem categoria'
+                  : 'Categoria: ${categoryNames[filters.categoryId] ?? 'indisponível'}',
+            ),
+            onDeleted: () => onChanged(filters.withCategory(null)),
+          ),
+        if (filters.minimumAcquisition != null ||
+            filters.maximumAcquisition != null)
+          InputChip(
+            label: Text(_acquisitionFilterLabel(filters)),
+            onDeleted: () => onChanged(filters.withAcquisition(null, null)),
+          ),
+        if (filters.stock != _StockFilter.all)
+          InputChip(
+            label: Text(_stockFilterLabel(filters.stock)),
+            onDeleted: () => onChanged(filters.withStock(_StockFilter.all)),
+          ),
+        TextButton.icon(
+          onPressed: () => onChanged(const _ProductFilters()),
+          icon: const Icon(Icons.filter_alt_off_outlined),
+          label: const Text('Limpar filtros'),
+        ),
+      ],
+    );
+  }
+}
+
+String _acquisitionFilterLabel(_ProductFilters filters) {
+  final minimum = filters.minimumAcquisition;
+  final maximum = filters.maximumAcquisition;
+
+  if (minimum != null && maximum != null) {
+    return 'Aquisição: ${_currency(minimum)} até ${_currency(maximum)}';
+  }
+  if (minimum != null) {
+    return 'Aquisição: a partir de ${_currency(minimum)}';
+  }
+  return 'Aquisição: até ${_currency(maximum!)}';
+}
+
+String _stockFilterLabel(_StockFilter filter) {
+  return switch (filter) {
+    _StockFilter.all => 'Estoque: todos',
+    _StockFilter.outOfStock => 'Estoque: sem estoque',
+    _StockFilter.lowStock => 'Estoque: baixo',
+    _StockFilter.aboveMinimum => 'Estoque: acima do mínimo',
+  };
+}
+
+class _AdvancedProductFiltersDialog extends StatefulWidget {
+  const _AdvancedProductFiltersDialog({
+    required this.initialFilters,
+    required this.categories,
+  });
+
+  final _ProductFilters initialFilters;
+  final List<Category> categories;
+
+  @override
+  State<_AdvancedProductFiltersDialog> createState() =>
+      _AdvancedProductFiltersDialogState();
+}
+
+class _AdvancedProductFiltersDialogState
+    extends State<_AdvancedProductFiltersDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _minimumController;
+  late final TextEditingController _maximumController;
+  late _ProductFilter _status;
+  late String? _categoryId;
+  late _StockFilter _stock;
+  String? _rangeError;
+
+  @override
+  void initState() {
+    super.initState();
+    final filters = widget.initialFilters;
+    _status = filters.status;
+    _categoryId = filters.categoryId;
+    _stock = filters.stock;
+    _minimumController = TextEditingController(
+      text: filters.minimumAcquisition == null
+          ? ''
+          : _editableDecimal(filters.minimumAcquisition!),
+    );
+    _maximumController = TextEditingController(
+      text: filters.maximumAcquisition == null
+          ? ''
+          : _editableDecimal(filters.maximumAcquisition!),
+    );
+  }
+
+  @override
+  void dispose() {
+    _minimumController.dispose();
+    _maximumController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final categories = [...widget.categories]
+      ..sort(
+        (first, second) =>
+            first.name.toLowerCase().compareTo(second.name.toLowerCase()),
+      );
+    final selectedCategoryIsUnavailable =
+        _categoryId != null &&
+        _categoryId != _uncategorizedCategoryFilter &&
+        !categories.any((category) => category.id == _categoryId);
+
+    return AlertDialog(
+      icon: const Icon(Icons.filter_alt_outlined),
+      title: const Text('Filtros avançados'),
+      content: SizedBox(
+        width: 540,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                DropdownButtonFormField<_ProductFilter>(
+                  value: _status,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Status'),
+                  items: const [
+                    DropdownMenuItem(
+                      value: _ProductFilter.all,
+                      child: Text('Todos'),
+                    ),
+                    DropdownMenuItem(
+                      value: _ProductFilter.active,
+                      child: Text('Ativos'),
+                    ),
+                    DropdownMenuItem(
+                      value: _ProductFilter.inactive,
+                      child: Text('Inativos'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setState(() => _status = value);
+                  },
+                ),
+                const SizedBox(height: 14),
+                DropdownButtonFormField<String>(
+                  value: _categoryId ?? '',
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Categoria'),
+                  items: [
+                    const DropdownMenuItem(value: '', child: Text('Todas')),
+                    const DropdownMenuItem(
+                      value: _uncategorizedCategoryFilter,
+                      child: Text('Sem categoria'),
+                    ),
+                    if (selectedCategoryIsUnavailable)
+                      DropdownMenuItem(
+                        value: _categoryId,
+                        child: const Text('Categoria indisponível'),
+                      ),
+                    for (final category in categories)
+                      if (category.isActive || category.id == _categoryId)
+                        DropdownMenuItem(
+                          value: category.id,
+                          child: Text(
+                            category.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                  ],
+                  onChanged: (value) => setState(
+                    () => _categoryId = value == null || value.isEmpty
+                        ? null
+                        : value,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                DropdownButtonFormField<_StockFilter>(
+                  value: _stock,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Situação do estoque',
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: _StockFilter.all,
+                      child: Text('Todas'),
+                    ),
+                    DropdownMenuItem(
+                      value: _StockFilter.outOfStock,
+                      child: Text('Sem estoque'),
+                    ),
+                    DropdownMenuItem(
+                      value: _StockFilter.lowStock,
+                      child: Text('Estoque baixo'),
+                    ),
+                    DropdownMenuItem(
+                      value: _StockFilter.aboveMinimum,
+                      child: Text('Acima do estoque mínimo'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) setState(() => _stock = value);
+                  },
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Valor de aquisição',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 10),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final minimumField = TextFormField(
+                      controller: _minimumController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      inputFormatters: [_decimalFormatter],
+                      decoration: const InputDecoration(
+                        labelText: 'Mínimo',
+                        prefixText: 'R\$ ',
+                      ),
+                      validator: _moneyValidator,
+                    );
+                    final maximumField = TextFormField(
+                      controller: _maximumController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      inputFormatters: [_decimalFormatter],
+                      decoration: const InputDecoration(
+                        labelText: 'Máximo',
+                        prefixText: 'R\$ ',
+                      ),
+                      validator: _moneyValidator,
+                    );
+
+                    if (constraints.maxWidth < 400) {
+                      return Column(
+                        children: [
+                          minimumField,
+                          const SizedBox(height: 12),
+                          maximumField,
+                        ],
+                      );
+                    }
+
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: minimumField),
+                        const SizedBox(width: 12),
+                        Expanded(child: maximumField),
+                      ],
+                    );
+                  },
+                ),
+                if (_rangeError != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _rangeError!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton.icon(
+          onPressed: _clear,
+          icon: const Icon(Icons.filter_alt_off_outlined),
+          label: const Text('Limpar'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton.icon(
+          onPressed: _apply,
+          icon: const Icon(Icons.check),
+          label: const Text('Aplicar filtros'),
+        ),
+      ],
+    );
+  }
+
+  void _clear() {
+    setState(() {
+      _status = _ProductFilter.all;
+      _categoryId = null;
+      _stock = _StockFilter.all;
+      _minimumController.clear();
+      _maximumController.clear();
+      _rangeError = null;
+    });
+  }
+
+  void _apply() {
+    FocusScope.of(context).unfocus();
+    if (!_formKey.currentState!.validate()) return;
+
+    final minimum = _minimumController.text.trim().isEmpty
+        ? null
+        : _parseDecimal(_minimumController.text);
+    final maximum = _maximumController.text.trim().isEmpty
+        ? null
+        : _parseDecimal(_maximumController.text);
+
+    if (minimum != null && maximum != null && minimum > maximum) {
+      setState(() {
+        _rangeError = 'O valor mínimo não pode ser maior que o máximo.';
+      });
+      return;
+    }
+
+    Navigator.of(context).pop(
+      _ProductFilters(
+        status: _status,
+        categoryId: _categoryId,
+        minimumAcquisition: minimum,
+        maximumAcquisition: maximum,
+        stock: _stock,
+      ),
+    );
+  }
+}
+
+const _productsPerPage = 15;
 
 enum _ProductSort {
   nameAscending,
@@ -554,10 +1060,10 @@ enum _ProductSort {
   inactiveFirst,
 }
 
+final RegExp _naturalSortPartPattern = RegExp(r'\d+|\D+');
+
 int _compareProducts(Product first, Product second, _ProductSort sort) {
-  final nameComparison = first.name.toLowerCase().compareTo(
-    second.name.toLowerCase(),
-  );
+  final nameComparison = _compareNaturally(first.name, second.name);
 
   return switch (sort) {
     _ProductSort.nameAscending => nameComparison,
@@ -585,10 +1091,48 @@ int _compareProducts(Product first, Product second, _ProductSort sort) {
   };
 }
 
+int _compareNaturally(String first, String second) {
+  final normalizedFirst = first.toLowerCase();
+  final normalizedSecond = second.toLowerCase();
+  final firstParts = _naturalSortPartPattern
+      .allMatches(normalizedFirst)
+      .map((match) => match.group(0)!)
+      .toList(growable: false);
+  final secondParts = _naturalSortPartPattern
+      .allMatches(normalizedSecond)
+      .map((match) => match.group(0)!)
+      .toList(growable: false);
+  final commonLength = firstParts.length < secondParts.length
+      ? firstParts.length
+      : secondParts.length;
+
+  for (var index = 0; index < commonLength; index++) {
+    final firstPart = firstParts[index];
+    final secondPart = secondParts[index];
+    final firstNumber = BigInt.tryParse(firstPart);
+    final secondNumber = BigInt.tryParse(secondPart);
+    final comparison = firstNumber != null && secondNumber != null
+        ? firstNumber.compareTo(secondNumber)
+        : firstPart.compareTo(secondPart);
+
+    if (comparison != 0) return comparison;
+  }
+
+  final partCountComparison = firstParts.length.compareTo(secondParts.length);
+  if (partCountComparison != 0) return partCountComparison;
+
+  return normalizedFirst.compareTo(normalizedSecond);
+}
+
 class _ProductList extends StatelessWidget {
-  const _ProductList({required this.products, required this.onEdit});
+  const _ProductList({
+    required this.products,
+    required this.categoryNames,
+    required this.onEdit,
+  });
 
   final List<Product> products;
+  final Map<String, String> categoryNames;
   final ValueChanged<Product> onEdit;
 
   @override
@@ -599,45 +1143,103 @@ class _ProductList extends StatelessWidget {
           return Column(
             children: [
               for (var index = 0; index < products.length; index++) ...[
-                _ProductCard(product: products[index], onEdit: onEdit),
+                _ProductCard(
+                  product: products[index],
+                  categoryName: _categoryName(products[index], categoryNames),
+                  onEdit: onEdit,
+                ),
                 if (index != products.length - 1) const SizedBox(height: 10),
               ],
             ],
           );
         }
 
-        return _ProductTable(products: products, onEdit: onEdit);
+        return _ProductTable(
+          products: products,
+          categoryNames: categoryNames,
+          onEdit: onEdit,
+        );
       },
     );
   }
 }
 
-class _ProductTable extends StatelessWidget {
-  const _ProductTable({required this.products, required this.onEdit});
+class _ProductTable extends StatefulWidget {
+  const _ProductTable({
+    required this.products,
+    required this.categoryNames,
+    required this.onEdit,
+  });
 
   final List<Product> products;
+  final Map<String, String> categoryNames;
   final ValueChanged<Product> onEdit;
+
+  @override
+  State<_ProductTable> createState() => _ProductTableState();
+}
+
+class _ProductTableState extends State<_ProductTable> {
+  final ScrollController _horizontalController = ScrollController();
+
+  @override
+  void dispose() {
+    _horizontalController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.surfaceContainerLowest,
-        border: Border.all(color: colors.outlineVariant),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        children: [
-          const _ProductTableHeader(),
-          const Divider(),
-          for (var index = 0; index < products.length; index++) ...[
-            _ProductTableRow(product: products[index], onEdit: onEdit),
-            if (index != products.length - 1) const Divider(),
-          ],
-        ],
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final tableWidth = constraints.maxWidth < 1480
+            ? 1480.0
+            : constraints.maxWidth;
+
+        return Scrollbar(
+          controller: _horizontalController,
+          thumbVisibility: true,
+          scrollbarOrientation: ScrollbarOrientation.bottom,
+          child: SingleChildScrollView(
+            controller: _horizontalController,
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.only(bottom: 12),
+            child: SizedBox(
+              width: tableWidth,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: colors.surfaceContainerLowest,
+                  border: Border.all(color: colors.outlineVariant),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  children: [
+                    const _ProductTableHeader(),
+                    const Divider(),
+                    for (
+                      var index = 0;
+                      index < widget.products.length;
+                      index++
+                    ) ...[
+                      _ProductTableRow(
+                        product: widget.products[index],
+                        categoryName: _categoryName(
+                          widget.products[index],
+                          widget.categoryNames,
+                        ),
+                        onEdit: widget.onEdit,
+                      ),
+                      if (index != widget.products.length - 1) const Divider(),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -656,6 +1258,7 @@ class _ProductTableHeader extends StatelessWidget {
       child: Row(
         children: [
           Expanded(flex: 4, child: Text('Produto', style: style)),
+          Expanded(flex: 2, child: Text('Categoria', style: style)),
           Expanded(flex: 2, child: Text('Preço de venda', style: style)),
           Expanded(child: Text('Estoque', style: style)),
           Expanded(child: Text('Unidade', style: style)),
@@ -670,9 +1273,14 @@ class _ProductTableHeader extends StatelessWidget {
 }
 
 class _ProductTableRow extends StatelessWidget {
-  const _ProductTableRow({required this.product, required this.onEdit});
+  const _ProductTableRow({
+    required this.product,
+    required this.categoryName,
+    required this.onEdit,
+  });
 
   final Product product;
+  final String categoryName;
   final ValueChanged<Product> onEdit;
 
   @override
@@ -705,6 +1313,14 @@ class _ProductTableRow extends StatelessWidget {
               ],
             ),
           ),
+          Expanded(
+            flex: 2,
+            child: Text(
+              categoryName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
           Expanded(flex: 2, child: Text(_currency(product.salePrice))),
           Expanded(child: Text('${product.currentStock}')),
           Expanded(child: Text(product.unit)),
@@ -723,9 +1339,14 @@ class _ProductTableRow extends StatelessWidget {
 }
 
 class _ProductCard extends StatelessWidget {
-  const _ProductCard({required this.product, required this.onEdit});
+  const _ProductCard({
+    required this.product,
+    required this.categoryName,
+    required this.onEdit,
+  });
 
   final Product product;
+  final String categoryName;
   final ValueChanged<Product> onEdit;
 
   @override
@@ -774,6 +1395,7 @@ class _ProductCard extends StatelessWidget {
               runSpacing: 10,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
+                _ProductDetail(label: 'Categoria', value: categoryName),
                 _ProductDetail(
                   label: 'Venda',
                   value: _currency(product.salePrice),
@@ -801,20 +1423,33 @@ class _ProductCard extends StatelessWidget {
   }
 }
 
+String _categoryName(Product product, Map<String, String> categoryNames) {
+  final categoryId = product.categoryId;
+  if (categoryId == null || categoryId.isEmpty) {
+    return 'Sem categoria';
+  }
+
+  return categoryNames[categoryId] ?? 'Categoria não encontrada';
+}
+
 class _ProductPagination extends StatelessWidget {
   const _ProductPagination({
     required this.currentPage,
     required this.pageCount,
+    required this.productCount,
     required this.onPageChanged,
   });
 
   final int currentPage;
   final int pageCount;
+  final int productCount;
   final ValueChanged<int> onPageChanged;
 
   @override
   Widget build(BuildContext context) {
-    final pageText = 'Página $currentPage de $pageCount';
+    final productLabel = productCount == 1 ? 'produto' : 'produtos';
+    final pageText =
+        'Página $currentPage de $pageCount • $productCount $productLabel';
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1090,7 +1725,7 @@ class _ProductsLoading extends StatelessWidget {
 
 enum _ProductFormResult { saved, deleted }
 
-class _ProductFormDialog extends StatefulWidget {
+class _ProductFormDialog extends ConsumerStatefulWidget {
   const _ProductFormDialog({
     required this.companyId,
     required this.repository,
@@ -1104,10 +1739,10 @@ class _ProductFormDialog extends StatefulWidget {
   final Product? product;
 
   @override
-  State<_ProductFormDialog> createState() => _ProductFormDialogState();
+  ConsumerState<_ProductFormDialog> createState() => _ProductFormDialogState();
 }
 
-class _ProductFormDialogState extends State<_ProductFormDialog> {
+class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _descriptionController;
@@ -1115,6 +1750,8 @@ class _ProductFormDialogState extends State<_ProductFormDialog> {
   late final TextEditingController _salePriceController;
   late final TextEditingController _minimumStockController;
   late final TextEditingController _supplierController;
+  String? _selectedCategoryId;
+  Category? _temporaryCategory;
   late String _unit;
   late bool _isActive;
   bool _saving = false;
@@ -1148,6 +1785,7 @@ class _ProductFormDialogState extends State<_ProductFormDialog> {
       text: product == null ? '' : '${product.minimumStock}',
     );
     _supplierController = TextEditingController(text: product?.supplier ?? '');
+    _selectedCategoryId = product?.categoryId;
     _unit = product?.unit ?? 'un';
     _isActive = product?.isActive ?? true;
   }
@@ -1166,6 +1804,7 @@ class _ProductFormDialogState extends State<_ProductFormDialog> {
   @override
   Widget build(BuildContext context) {
     final isCompact = MediaQuery.sizeOf(context).width < 640;
+    final categoriesState = ref.watch(categoriesProvider(widget.companyId));
     final content = Material(
       color: Theme.of(context).colorScheme.surface,
       child: SafeArea(
@@ -1181,7 +1820,7 @@ class _ProductFormDialogState extends State<_ProductFormDialog> {
                 key: _formKey,
                 child: SingleChildScrollView(
                   padding: const EdgeInsets.all(22),
-                  child: _buildFields(),
+                  child: _buildFields(categoriesState),
                 ),
               ),
             ),
@@ -1214,7 +1853,7 @@ class _ProductFormDialogState extends State<_ProductFormDialog> {
     );
   }
 
-  Widget _buildFields() {
+  Widget _buildFields(AsyncValue<List<Category>> categoriesState) {
     final colors = Theme.of(context).colorScheme;
 
     return Column(
@@ -1272,6 +1911,8 @@ class _ProductFormDialogState extends State<_ProductFormDialog> {
             alignLabelWithHint: true,
           ),
         ),
+        const SizedBox(height: 14),
+        _buildCategoryField(categoriesState),
         const SizedBox(height: 14),
         LayoutBuilder(
           builder: (context, constraints) {
@@ -1370,6 +2011,138 @@ class _ProductFormDialogState extends State<_ProductFormDialog> {
     );
   }
 
+  Widget _buildCategoryField(AsyncValue<List<Category>> categoriesState) {
+    return categoriesState.when(
+      loading: () => const InputDecorator(
+        decoration: InputDecoration(labelText: 'Categoria'),
+        child: Row(
+          children: [
+            SizedBox.square(
+              dimension: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 12),
+            Text('Carregando categorias...'),
+          ],
+        ),
+      ),
+      error: (error, stackTrace) => InputDecorator(
+        decoration: const InputDecoration(
+          labelText: 'Categoria',
+          errorText: 'Não foi possível carregar as categorias.',
+        ),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () =>
+                ref.invalidate(categoriesProvider(widget.companyId)),
+            icon: const Icon(Icons.refresh),
+            label: const Text('Tentar novamente'),
+          ),
+        ),
+      ),
+      data: (categories) {
+        final availableCategories = [...categories];
+        final temporaryCategory = _temporaryCategory;
+        if (temporaryCategory != null &&
+            !availableCategories.any(
+              (category) => category.id == temporaryCategory.id,
+            )) {
+          availableCategories.add(temporaryCategory);
+        }
+        availableCategories.sort(
+          (first, second) =>
+              first.name.toLowerCase().compareTo(second.name.toLowerCase()),
+        );
+
+        final selectedCategoryExists =
+            _selectedCategoryId == null ||
+            availableCategories.any(
+              (category) => category.id == _selectedCategoryId,
+            );
+        final dropdown = DropdownButtonFormField<String>(
+          value: selectedCategoryExists ? (_selectedCategoryId ?? '') : '',
+          isExpanded: true,
+          decoration: const InputDecoration(
+            labelText: 'Categoria',
+            prefixIcon: Icon(Icons.category_outlined),
+          ),
+          items: [
+            const DropdownMenuItem(value: '', child: Text('Sem categoria')),
+            for (final category in availableCategories)
+              if (category.isActive || category.id == _selectedCategoryId)
+                DropdownMenuItem(
+                  value: category.id,
+                  child: Text(
+                    category.isActive
+                        ? category.name
+                        : '${category.name} (inativa)',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+          ],
+          onChanged: _saving
+              ? null
+              : (value) => setState(
+                  () => _selectedCategoryId = value == null || value.isEmpty
+                      ? null
+                      : value,
+                ),
+        );
+        final createButton = SizedBox(
+          height: 56,
+          child: OutlinedButton.icon(
+            onPressed: _saving
+                ? null
+                : () => _createCategory(availableCategories),
+            icon: const Icon(Icons.create_new_folder_outlined),
+            label: const Text('Nova categoria'),
+          ),
+        );
+
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth < 520) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [dropdown, const SizedBox(height: 10), createButton],
+              );
+            }
+
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: dropdown),
+                const SizedBox(width: 12),
+                createButton,
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _createCategory(List<Category> existingCategories) async {
+    final category = await showDialog<Category>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _CreateCategoryDialog(
+        companyId: widget.companyId,
+        repository: ref.read(categoryRepositoryProvider),
+        existingCategories: existingCategories,
+      ),
+    );
+
+    if (category != null && mounted) {
+      setState(() {
+        _temporaryCategory = category;
+        _selectedCategoryId = category.id;
+      });
+    }
+  }
+
   Widget _responsiveFields(double width, List<Widget> fields) {
     if (width < 520) {
       return Column(
@@ -1406,7 +2179,7 @@ class _ProductFormDialogState extends State<_ProductFormDialog> {
       companyId: widget.companyId,
       name: _nameController.text.trim(),
       description: _descriptionController.text.trim(),
-      categoryId: current?.categoryId,
+      categoryId: _selectedCategoryId,
       acquisitionCost: _parseDecimal(_acquisitionCostController.text),
       salePrice: _parseDecimal(_salePriceController.text),
       currentStock: current?.currentStock ?? 0,
@@ -1464,6 +2237,167 @@ class _ProductFormDialogState extends State<_ProductFormDialog> {
 
     if (deleted == true && mounted) {
       Navigator.of(context).pop(_ProductFormResult.deleted);
+    }
+  }
+}
+
+class _CreateCategoryDialog extends StatefulWidget {
+  const _CreateCategoryDialog({
+    required this.companyId,
+    required this.repository,
+    required this.existingCategories,
+  });
+
+  final String companyId;
+  final CategoryRepository repository;
+  final List<Category> existingCategories;
+
+  @override
+  State<_CreateCategoryDialog> createState() => _CreateCategoryDialogState();
+}
+
+class _CreateCategoryDialogState extends State<_CreateCategoryDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  bool _saving = false;
+  String? _errorMessage;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return PopScope(
+      canPop: !_saving,
+      child: AlertDialog(
+        icon: const Icon(Icons.create_new_folder_outlined),
+        title: const Text('Nova categoria'),
+        content: SizedBox(
+          width: 420,
+          child: Form(
+            key: _formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_errorMessage != null) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: colors.errorContainer,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      _errorMessage!,
+                      style: TextStyle(color: colors.onErrorContainer),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
+                TextFormField(
+                  controller: _nameController,
+                  autofocus: true,
+                  enabled: !_saving,
+                  textCapitalization: TextCapitalization.sentences,
+                  textInputAction: TextInputAction.done,
+                  maxLength: 80,
+                  decoration: const InputDecoration(
+                    labelText: 'Nome da categoria',
+                    prefixIcon: Icon(Icons.category_outlined),
+                  ),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Informe o nome da categoria.';
+                    }
+                    return null;
+                  },
+                  onFieldSubmitted: (_) {
+                    if (!_saving) {
+                      _save();
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: _saving ? null : () => Navigator.of(context).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton.icon(
+            onPressed: _saving ? null : _save,
+            icon: _saving
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.save_outlined),
+            label: Text(_saving ? 'Salvando...' : 'Criar categoria'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _save() async {
+    FocusScope.of(context).unfocus();
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    final name = _nameController.text.trim();
+    final normalizedName = name.toLowerCase();
+    final duplicate = widget.existingCategories
+        .where(
+          (category) => category.name.trim().toLowerCase() == normalizedName,
+        )
+        .firstOrNull;
+
+    if (duplicate != null) {
+      if (duplicate.isActive) {
+        Navigator.of(context).pop(duplicate);
+      } else {
+        setState(() {
+          _errorMessage = 'Esta categoria já existe, mas está inativa.';
+        });
+      }
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+      _errorMessage = null;
+    });
+
+    final now = DateTime.now();
+    final category = Category(
+      id: widget.repository.createId(widget.companyId),
+      companyId: widget.companyId,
+      name: name,
+      createdAt: now,
+      updatedAt: now,
+    );
+
+    try {
+      await widget.repository.save(category);
+      if (mounted) {
+        Navigator.of(context).pop(category);
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _errorMessage = _firestoreMessage(error);
+        });
+      }
     }
   }
 }

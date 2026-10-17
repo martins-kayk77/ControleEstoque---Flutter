@@ -28,7 +28,7 @@ class AppShell extends ConsumerWidget {
       selectedIcon: Icons.inventory_2,
     ),
     AppDestination(
-      label: 'Estoque',
+      label: 'Movimentações',
       route: '/stock',
       icon: Icons.sync_alt_outlined,
       selectedIcon: Icons.sync_alt,

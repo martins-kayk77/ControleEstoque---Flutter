@@ -30,7 +30,6 @@ class FirestoreStockMovementRepository implements StockMovementRepository {
   Stream<List<StockMovement>> watchRecentMovements(String companyId) {
     return _collection(companyId)
         .orderBy('occurredAt', descending: true)
-        .limit(50)
         .snapshots()
         .map((snapshot) => snapshot.docs.map(_fromSnapshot).toList());
   }
@@ -55,6 +54,7 @@ class FirestoreStockMovementRepository implements StockMovementRepository {
       'type': movement.type.code,
       'quantityDelta': movement.quantityDelta,
       'occurredAt': Timestamp.fromDate(movement.occurredAt),
+      'operationId': movement.operationId,
       'userId': movement.userId,
       'reason': movement.reason,
       'note': movement.note,
@@ -77,6 +77,7 @@ class FirestoreStockMovementRepository implements StockMovementRepository {
       type: stockMovementTypeFromCode(readString(data, 'type')),
       quantityDelta: readInt(data, 'quantityDelta'),
       occurredAt: readDateTime(data['occurredAt']),
+      operationId: _nullableString(data['operationId']),
       userId: _nullableString(data['userId']),
       reason: readString(data, 'reason'),
       note: readString(data, 'note'),

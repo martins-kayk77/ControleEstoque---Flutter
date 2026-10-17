@@ -8,6 +8,7 @@ import '../domain/category.dart';
 
 abstract class CategoryRepository {
   Stream<List<Category>> watchCategories(String companyId);
+  String createId(String companyId);
   Future<void> save(Category category);
 }
 
@@ -19,6 +20,11 @@ class FirestoreCategoryRepository implements CategoryRepository {
   const FirestoreCategoryRepository(this._firestore);
 
   final FirebaseFirestore _firestore;
+
+  @override
+  String createId(String companyId) {
+    return _collection(companyId).doc().id;
+  }
 
   @override
   Stream<List<Category>> watchCategories(String companyId) {

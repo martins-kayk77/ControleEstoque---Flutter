@@ -55,6 +55,7 @@ class StockMovement {
     required this.type,
     required this.quantityDelta,
     required this.occurredAt,
+    this.operationId,
     this.userId,
     this.reason = '',
     this.note = '',
@@ -68,6 +69,7 @@ class StockMovement {
   final StockMovementType type;
   final int quantityDelta;
   final DateTime occurredAt;
+  final String? operationId;
   final String? userId;
   final String reason;
   final String note;
