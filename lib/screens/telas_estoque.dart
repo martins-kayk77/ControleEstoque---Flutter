@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../app/theme/app_theme.dart';
 import '../features/auth/application/auth_state.dart';
+import '../features/auth/data/auth_repository.dart';
 import '../features/auth/domain/app_user.dart';
 import '../features/company/data/company_repository.dart';
 import '../features/inventory/application/inventory_service.dart';
@@ -136,6 +137,8 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
                 }),
                 onPageChanged: (value) => setState(() => _currentPage = value),
                 onRegisterMovement: () => _openMovementForm(user, products),
+                onReverseOperation: (operation) =>
+                    _openReverseDialog(user, operation),
               ),
             ),
           ),
@@ -188,6 +191,7 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
       builder: (context) => _MovementFormDialog(
         companyId: companyId,
         userId: user.id,
+        userEmail: user.email,
         products: activeProducts,
         inventoryService: ref.read(inventoryServiceProvider),
       ),
@@ -196,6 +200,43 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
     if (saved == true && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Movimentação registrada com sucesso.')),
+      );
+    }
+  }
+
+  Future<void> _openReverseDialog(
+    AppUser user,
+    _StockOperation operation,
+  ) async {
+    final reversed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => _ReverseMovementDialog(
+        operation: operation,
+        onConfirm: (responsibleName, reason, password) async {
+          await ref
+              .read(authRepositoryProvider)
+              .reauthenticateWithPassword(password);
+          await ref
+              .read(inventoryServiceProvider)
+              .reverseOperation(
+                companyId: operation.reference.companyId,
+                operationId: operation.id,
+                movementIds: [
+                  for (final movement in operation.items) movement.id,
+                ],
+                userId: user.id,
+                userEmail: user.email,
+                responsibleName: responsibleName,
+                reason: reason,
+              );
+        },
+      ),
+    );
+
+    if (reversed == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Movimentação estornada com sucesso.')),
       );
     }
   }
@@ -228,7 +269,7 @@ class _StockMovementsPageState extends ConsumerState<StockMovementsPage> {
 
 const _stockOperationsPerPage = 15;
 
-enum _MovementFilter { all, inbound, outbound, adjustments }
+enum _MovementFilter { all, inbound, outbound, adjustments, reversals }
 
 enum _MovementPeriod { all, today, last7Days, last30Days, custom }
 
@@ -250,6 +291,7 @@ extension _MovementFilterX on _MovementFilter {
       _MovementFilter.inbound => 'Entradas',
       _MovementFilter.outbound => 'Saídas',
       _MovementFilter.adjustments => 'Ajustes',
+      _MovementFilter.reversals => 'Estornos',
     };
   }
 }
@@ -362,10 +404,20 @@ class _StockOperation {
   StockMovement get reference => items.first;
   StockMovementType get type => reference.type;
   DateTime get occurredAt => reference.occurredAt;
+  String get responsibleName => reference.responsibleName;
+  String get userEmail => reference.userEmail;
+  String get operationReference => reference.operationReference;
   String get reason => reference.reason;
   String get note => reference.note;
+  String? get reversalOfOperationId => reference.reversalOfOperationId;
+  String? get reversalOperationId => reference.reversalOperationId;
+  DateTime? get reversedAt => reference.reversedAt;
+  String get reversedByResponsibleName => reference.reversedByResponsibleName;
+  String get reversalReason => reference.reversalReason;
   bool get increasesStock => reference.increasesStock;
   bool get decreasesStock => reference.decreasesStock;
+  bool get isReversal => reference.isReversal;
+  bool get isReversed => reference.isReversed;
 }
 
 List<_StockOperation> _groupStockOperations(List<StockMovement> movements) {
@@ -380,6 +432,9 @@ List<_StockOperation> _groupStockOperations(List<StockMovement> movements) {
             movement.occurredAt.microsecondsSinceEpoch,
             movement.type.code,
             movement.userId ?? '',
+            movement.userEmail,
+            movement.responsibleName,
+            movement.operationReference,
             movement.reason,
             movement.note,
             movement.sourceChannelId ?? '',
@@ -411,6 +466,7 @@ class _StockContent extends StatelessWidget {
     required this.onSortChanged,
     required this.onPageChanged,
     required this.onRegisterMovement,
+    required this.onReverseOperation,
   });
 
   final List<Product> products;
@@ -425,6 +481,7 @@ class _StockContent extends StatelessWidget {
   final ValueChanged<_MovementSort> onSortChanged;
   final ValueChanged<int> onPageChanged;
   final VoidCallback onRegisterMovement;
+  final ValueChanged<_StockOperation> onReverseOperation;
 
   @override
   Widget build(BuildContext context) {
@@ -442,6 +499,14 @@ class _StockContent extends StatelessWidget {
                 return productName.toLowerCase().contains(normalizedSearch);
               }) ||
               operation.type.label.toLowerCase().contains(normalizedSearch) ||
+              operation.responsibleName.toLowerCase().contains(
+                normalizedSearch,
+              ) ||
+              operation.operationReference.toLowerCase().contains(
+                normalizedSearch,
+              ) ||
+              operation.id.toLowerCase().contains(normalizedSearch) ||
+              operation.userEmail.toLowerCase().contains(normalizedSearch) ||
               operation.reason.toLowerCase().contains(normalizedSearch) ||
               operation.note.toLowerCase().contains(normalizedSearch);
           final matchesProducts =
@@ -528,6 +593,7 @@ class _StockContent extends StatelessWidget {
           _MovementHistory(
             operations: pageOperations,
             productsById: productsById,
+            onReverseOperation: onReverseOperation,
           ),
           const SizedBox(height: 10),
           _StockPagination(
@@ -553,6 +619,7 @@ class _StockStats extends StatelessWidget {
         .where(
           (operation) =>
               operation.type != StockMovementType.adjustment &&
+              operation.type != StockMovementType.reversal &&
               operation.increasesStock,
         )
         .length;
@@ -560,11 +627,15 @@ class _StockStats extends StatelessWidget {
         .where(
           (operation) =>
               operation.type != StockMovementType.adjustment &&
+              operation.type != StockMovementType.reversal &&
               operation.decreasesStock,
         )
         .length;
     final adjustments = operations
         .where((operation) => operation.type == StockMovementType.adjustment)
+        .length;
+    final reversals = operations
+        .where((operation) => operation.type == StockMovementType.reversal)
         .length;
 
     return _StatsRow(
@@ -573,6 +644,7 @@ class _StockStats extends StatelessWidget {
         PlaceholderStat('Entradas', '$inbound', Icons.add_circle_outline),
         PlaceholderStat('Saídas', '$outbound', Icons.remove_circle_outline),
         PlaceholderStat('Ajustes', '$adjustments', Icons.tune_outlined),
+        PlaceholderStat('Estornos', '$reversals', Icons.undo_outlined),
       ],
     );
   }
@@ -1276,10 +1348,12 @@ class _MovementHistory extends StatelessWidget {
   const _MovementHistory({
     required this.operations,
     required this.productsById,
+    required this.onReverseOperation,
   });
 
   final List<_StockOperation> operations;
   final Map<String, Product> productsById;
+  final ValueChanged<_StockOperation> onReverseOperation;
 
   @override
   Widget build(BuildContext context) {
@@ -1292,6 +1366,7 @@ class _MovementHistory extends StatelessWidget {
                 _OperationCard(
                   operation: operation,
                   productsById: productsById,
+                  onReverse: () => onReverseOperation(operation),
                 ),
                 if (operation != operations.last) const SizedBox(height: 10),
               ],
@@ -1302,6 +1377,7 @@ class _MovementHistory extends StatelessWidget {
         return _MovementTable(
           operations: operations,
           productsById: productsById,
+          onReverseOperation: onReverseOperation,
         );
       },
     );
@@ -1309,67 +1385,57 @@ class _MovementHistory extends StatelessWidget {
 }
 
 class _MovementTable extends StatefulWidget {
-  const _MovementTable({required this.operations, required this.productsById});
+  const _MovementTable({
+    required this.operations,
+    required this.productsById,
+    required this.onReverseOperation,
+  });
 
   final List<_StockOperation> operations;
   final Map<String, Product> productsById;
+  final ValueChanged<_StockOperation> onReverseOperation;
 
   @override
   State<_MovementTable> createState() => _MovementTableState();
 }
 
 class _MovementTableState extends State<_MovementTable> {
-  final ScrollController _scrollController = ScrollController();
   final Set<String> _expandedOperationIds = {};
-
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return Scrollbar(
-      controller: _scrollController,
-      thumbVisibility: true,
-      scrollbarOrientation: ScrollbarOrientation.bottom,
-      child: SingleChildScrollView(
-        controller: _scrollController,
-        scrollDirection: Axis.horizontal,
-        child: Container(
-          width: 1180,
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerLowest,
-            border: Border.all(color: colorScheme.outlineVariant),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            children: [
-              const _MovementTableHeader(),
-              for (final operation in widget.operations) ...[
-                _OperationTableRow(
-                  operation: operation,
-                  productsById: widget.productsById,
-                  expanded: _expandedOperationIds.contains(operation.id),
-                  onToggle: () => setState(() {
-                    if (!_expandedOperationIds.add(operation.id)) {
-                      _expandedOperationIds.remove(operation.id);
-                    }
-                  }),
-                ),
-                if (_expandedOperationIds.contains(operation.id))
-                  _OperationItems(
-                    operation: operation,
-                    productsById: widget.productsById,
-                  ),
-              ],
-            ],
-          ),
-        ),
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerLowest,
+        border: Border.all(color: colorScheme.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          const _MovementTableHeader(),
+          for (final operation in widget.operations) ...[
+            _OperationTableRow(
+              operation: operation,
+              productsById: widget.productsById,
+              expanded: _expandedOperationIds.contains(operation.id),
+              onToggle: () => setState(() {
+                if (!_expandedOperationIds.add(operation.id)) {
+                  _expandedOperationIds.remove(operation.id);
+                }
+              }),
+            ),
+            if (_expandedOperationIds.contains(operation.id))
+              _OperationItems(
+                operation: operation,
+                productsById: widget.productsById,
+                onReverse: () => widget.onReverseOperation(operation),
+              ),
+          ],
+        ],
       ),
     );
   }
@@ -1391,12 +1457,13 @@ class _MovementTableHeader extends StatelessWidget {
       ),
       child: const Row(
         children: [
-          _TableCell(width: 170, child: Text('Data e hora')),
-          _TableCell(width: 160, child: Text('Operação')),
-          _TableCell(width: 320, child: Text('Produtos')),
-          _TableCell(width: 110, child: Text('Itens')),
-          Expanded(child: Text('Detalhes')),
-          SizedBox(width: 44),
+          _FlexibleTableCell(flex: 18, child: Text('Data e hora')),
+          _FlexibleTableCell(flex: 16, child: Text('Operação')),
+          _FlexibleTableCell(flex: 30, child: Text('Produtos')),
+          _FlexibleTableCell(flex: 11, child: Text('Itens')),
+          _FlexibleTableCell(flex: 17, child: Text('Responsável')),
+          _FlexibleTableCell(flex: 20, child: Text('Referência')),
+          SizedBox(width: 36),
         ],
       ),
     );
@@ -1419,7 +1486,7 @@ class _OperationTableRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final detail = _operationDetail(operation);
+    final reference = _operationReferenceLabel(operation);
 
     return Material(
       color: expanded
@@ -1437,16 +1504,16 @@ class _OperationTableRow extends StatelessWidget {
           ),
           child: Row(
             children: [
-              _TableCell(
-                width: 170,
+              _FlexibleTableCell(
+                flex: 18,
                 child: Text(_movementDateFormat.format(operation.occurredAt)),
               ),
-              _TableCell(
-                width: 160,
+              _FlexibleTableCell(
+                flex: 16,
                 child: _MovementBadge(movement: operation.reference),
               ),
-              _TableCell(
-                width: 320,
+              _FlexibleTableCell(
+                flex: 30,
                 child: Text(
                   _operationProductSummary(operation, productsById),
                   maxLines: 2,
@@ -1454,20 +1521,29 @@ class _OperationTableRow extends StatelessWidget {
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
               ),
-              _TableCell(
-                width: 110,
+              _FlexibleTableCell(
+                flex: 11,
                 child: Text(_operationItemCount(operation)),
               ),
-              Expanded(
+              _FlexibleTableCell(
+                flex: 17,
                 child: Text(
-                  detail,
+                  _operationResponsible(operation),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              _FlexibleTableCell(
+                flex: 20,
+                child: Text(
+                  reference,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(color: colorScheme.onSurfaceVariant),
                 ),
               ),
               SizedBox(
-                width: 44,
+                width: 36,
                 child: Icon(
                   expanded ? Icons.expand_less : Icons.expand_more,
                   color: colorScheme.onSurfaceVariant,
@@ -1477,6 +1553,21 @@ class _OperationTableRow extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _FlexibleTableCell extends StatelessWidget {
+  const _FlexibleTableCell({required this.flex, required this.child});
+
+  final int flex;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      flex: flex,
+      child: Padding(padding: const EdgeInsets.only(right: 12), child: child),
     );
   }
 }
@@ -1494,10 +1585,15 @@ class _TableCell extends StatelessWidget {
 }
 
 class _OperationItems extends StatelessWidget {
-  const _OperationItems({required this.operation, required this.productsById});
+  const _OperationItems({
+    required this.operation,
+    required this.productsById,
+    required this.onReverse,
+  });
 
   final _StockOperation operation;
   final Map<String, Product> productsById;
+  final VoidCallback onReverse;
 
   @override
   Widget build(BuildContext context) {
@@ -1513,6 +1609,10 @@ class _OperationItems extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _OperationAudit(operation: operation, onReverse: onReverse),
+          const SizedBox(height: 18),
+          Divider(color: colorScheme.outlineVariant),
+          const SizedBox(height: 14),
           Text(
             'Produtos da operação',
             style: Theme.of(context).textTheme.titleSmall,
@@ -1536,6 +1636,148 @@ class _OperationItems extends StatelessWidget {
             if (movement != operation.items.last)
               Divider(color: colorScheme.outlineVariant),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+class _OperationAudit extends StatelessWidget {
+  const _OperationAudit({required this.operation, required this.onReverse});
+
+  final _StockOperation operation;
+  final VoidCallback onReverse;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final canReverse = _canReverseOperation(operation);
+    final reversalDeadline = operation.occurredAt.add(const Duration(days: 7));
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Auditoria da operação',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+            ),
+            if (!operation.isReversal && !operation.isReversed)
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: canReverse ? colorScheme.error : null,
+                ),
+                onPressed: canReverse ? onReverse : null,
+                icon: Icon(
+                  canReverse ? Icons.undo_outlined : Icons.schedule_outlined,
+                ),
+                label: Text(
+                  canReverse ? 'Estornar movimentação' : 'Prazo encerrado',
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Wrap(
+          spacing: 24,
+          runSpacing: 16,
+          children: [
+            _AuditField(label: 'ID da movimentação', value: operation.id),
+            _AuditField(
+              label: 'Data e hora',
+              value: _movementDateFormat.format(operation.occurredAt),
+            ),
+            _AuditField(
+              label: 'Responsável',
+              value: _operationResponsible(operation),
+            ),
+            _AuditField(
+              label: 'Referência',
+              value: _operationReferenceLabel(operation),
+            ),
+            _AuditField(
+              label: 'Status',
+              value: _operationStatusLabel(operation),
+            ),
+            if (!operation.isReversal)
+              _AuditField(
+                label: 'Limite para estorno',
+                value: _movementDateFormat.format(reversalDeadline),
+              ),
+            if (operation.isReversal)
+              _AuditField(
+                label: 'Operação original',
+                value: operation.reversalOfOperationId!,
+              ),
+            if (operation.isReversed) ...[
+              _AuditField(
+                label: 'Operação de estorno',
+                value: operation.reversalOperationId!,
+              ),
+              _AuditField(
+                label: 'Estornada em',
+                value: operation.reversedAt == null
+                    ? 'Não informado'
+                    : _movementDateFormat.format(operation.reversedAt!),
+              ),
+              _AuditField(
+                label: 'Responsável pelo estorno',
+                value: operation.reversedByResponsibleName.trim().isEmpty
+                    ? 'Não informado'
+                    : operation.reversedByResponsibleName,
+              ),
+              _AuditField(
+                label: 'Motivo do estorno',
+                value: operation.reversalReason.trim().isEmpty
+                    ? 'Não informado'
+                    : operation.reversalReason,
+                wide: true,
+              ),
+            ],
+            if (_operationDetail(operation) != 'Sem detalhes')
+              _AuditField(
+                label: 'Observação',
+                value: _operationDetail(operation),
+                wide: true,
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _AuditField extends StatelessWidget {
+  const _AuditField({
+    required this.label,
+    required this.value,
+    this.wide = false,
+  });
+
+  final String label;
+  final String value;
+  final bool wide;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return SizedBox(
+      width: wide ? 460 : 210,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 3),
+          SelectableText(value, style: Theme.of(context).textTheme.bodyMedium),
         ],
       ),
     );
@@ -1598,10 +1840,15 @@ class _OperationItemRow extends StatelessWidget {
 }
 
 class _OperationCard extends StatefulWidget {
-  const _OperationCard({required this.operation, required this.productsById});
+  const _OperationCard({
+    required this.operation,
+    required this.productsById,
+    required this.onReverse,
+  });
 
   final _StockOperation operation;
   final Map<String, Product> productsById;
+  final VoidCallback onReverse;
 
   @override
   State<_OperationCard> createState() => _OperationCardState();
@@ -1662,21 +1909,36 @@ class _OperationCardState extends State<_OperationCard> {
                       value: _operationItemCount(operation),
                     ),
                   ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    flex: 2,
+                    child: _MovementDetail(
+                      label: 'Responsável',
+                      value: _operationResponsible(operation),
+                    ),
+                  ),
                   Icon(
                     _expanded ? Icons.expand_less : Icons.expand_more,
                     color: colorScheme.onSurfaceVariant,
                   ),
                 ],
               ),
-              if (_operationDetail(operation) != 'Sem detalhes') ...[
+              if (operation.operationReference.trim().isNotEmpty) ...[
                 const SizedBox(height: 14),
                 Text(
-                  _operationDetail(operation),
+                  'Ref.: ${operation.operationReference.trim()}',
                   style: TextStyle(color: colorScheme.onSurfaceVariant),
                 ),
               ],
               if (_expanded) ...[
                 const SizedBox(height: 14),
+                Divider(color: colorScheme.outlineVariant),
+                const SizedBox(height: 6),
+                _OperationAudit(
+                  operation: operation,
+                  onReverse: widget.onReverse,
+                ),
+                const SizedBox(height: 16),
                 Divider(color: colorScheme.outlineVariant),
                 const SizedBox(height: 6),
                 for (final movement in operation.items) ...[
@@ -1796,6 +2058,9 @@ class _MovementBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = _movementColor(context, movement);
+    final label = movement.isReversed
+        ? '${movement.type.label} • Estornada'
+        : movement.type.label;
 
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -1804,7 +2069,7 @@ class _MovementBadge extends StatelessWidget {
         const SizedBox(width: 7),
         Flexible(
           child: Text(
-            movement.type.label,
+            label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(color: color, fontWeight: FontWeight.w600),
@@ -2027,6 +2292,211 @@ class _StockLoading extends StatelessWidget {
   }
 }
 
+class _ReverseMovementDialog extends StatefulWidget {
+  const _ReverseMovementDialog({
+    required this.operation,
+    required this.onConfirm,
+  });
+
+  final _StockOperation operation;
+  final Future<void> Function(
+    String responsibleName,
+    String reason,
+    String password,
+  )
+  onConfirm;
+
+  @override
+  State<_ReverseMovementDialog> createState() => _ReverseMovementDialogState();
+}
+
+class _ReverseMovementDialogState extends State<_ReverseMovementDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _responsibleController = TextEditingController();
+  final _reasonController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _obscurePassword = true;
+  bool _submitting = false;
+  String? _errorMessage;
+
+  @override
+  void dispose() {
+    _responsibleController.dispose();
+    _reasonController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return PopScope(
+      canPop: !_submitting,
+      child: AlertDialog(
+        icon: Icon(Icons.undo_outlined, color: colorScheme.error),
+        title: const Text('Estornar movimentação?'),
+        content: SizedBox(
+          width: 480,
+          child: Form(
+            key: _formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Uma nova operação inversa será registrada sem apagar o histórico original.',
+                    style: TextStyle(color: colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 16),
+                  _MovementDetail(
+                    label: 'Operação original',
+                    value: widget.operation.id,
+                  ),
+                  const SizedBox(height: 16),
+                  if (_errorMessage != null) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: colorScheme.errorContainer,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        _errorMessage!,
+                        style: TextStyle(color: colorScheme.onErrorContainer),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+                  TextFormField(
+                    controller: _responsibleController,
+                    enabled: !_submitting,
+                    autofocus: true,
+                    textCapitalization: TextCapitalization.words,
+                    maxLength: 80,
+                    decoration: const InputDecoration(
+                      labelText: 'Responsável pelo estorno',
+                      prefixIcon: Icon(Icons.person_outline),
+                    ),
+                    validator: (value) {
+                      if ((value ?? '').trim().isEmpty) {
+                        return 'Informe quem está realizando o estorno.';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _reasonController,
+                    enabled: !_submitting,
+                    minLines: 2,
+                    maxLines: 4,
+                    maxLength: 240,
+                    decoration: const InputDecoration(
+                      labelText: 'Motivo do estorno',
+                      alignLabelWithHint: true,
+                      prefixIcon: Icon(Icons.notes_outlined),
+                    ),
+                    validator: (value) {
+                      if ((value ?? '').trim().isEmpty) {
+                        return 'Informe o motivo do estorno.';
+                      }
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _passwordController,
+                    enabled: !_submitting,
+                    obscureText: _obscurePassword,
+                    textInputAction: TextInputAction.done,
+                    decoration: InputDecoration(
+                      labelText: 'Senha de acesso',
+                      prefixIcon: const Icon(Icons.lock_outline),
+                      suffixIcon: IconButton(
+                        tooltip: _obscurePassword
+                            ? 'Mostrar senha'
+                            : 'Ocultar senha',
+                        onPressed: _submitting
+                            ? null
+                            : () => setState(
+                                () => _obscurePassword = !_obscurePassword,
+                              ),
+                        icon: Icon(
+                          _obscurePassword
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                        ),
+                      ),
+                    ),
+                    validator: (value) {
+                      if ((value ?? '').isEmpty) return 'Informe sua senha.';
+                      return null;
+                    },
+                    onFieldSubmitted: (_) {
+                      if (!_submitting) _submit();
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: _submitting
+                ? null
+                : () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: colorScheme.error,
+              foregroundColor: colorScheme.onError,
+            ),
+            onPressed: _submitting ? null : _submit,
+            icon: _submitting
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.undo_outlined),
+            label: Text(_submitting ? 'Estornando...' : 'Confirmar estorno'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _submit() async {
+    FocusScope.of(context).unfocus();
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() {
+      _submitting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await widget.onConfirm(
+        _responsibleController.text.trim(),
+        _reasonController.text.trim(),
+        _passwordController.text,
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _submitting = false;
+          _errorMessage = _reversalErrorMessage(error);
+        });
+      }
+    }
+  }
+}
+
 enum _MovementDirection { inbound, outbound, adjustment }
 
 enum _AdjustmentDirection { increase, decrease }
@@ -2035,12 +2505,14 @@ class _MovementFormDialog extends StatefulWidget {
   const _MovementFormDialog({
     required this.companyId,
     required this.userId,
+    required this.userEmail,
     required this.products,
     required this.inventoryService,
   });
 
   final String companyId;
   final String userId;
+  final String userEmail;
   final List<Product> products;
   final InventoryService inventoryService;
 
@@ -2050,6 +2522,8 @@ class _MovementFormDialog extends StatefulWidget {
 
 class _MovementFormDialogState extends State<_MovementFormDialog> {
   final _formKey = GlobalKey<FormState>();
+  final _responsibleController = TextEditingController();
+  final _referenceController = TextEditingController();
   final _reasonController = TextEditingController();
   late final List<Product> _products;
   final List<_MovementFormItem> _items = [];
@@ -2071,6 +2545,8 @@ class _MovementFormDialogState extends State<_MovementFormDialog> {
     for (final item in _items) {
       item.dispose(_refreshPreview);
     }
+    _responsibleController.dispose();
+    _referenceController.dispose();
     _reasonController.dispose();
     super.dispose();
   }
@@ -2210,6 +2686,35 @@ class _MovementFormDialogState extends State<_MovementFormDialog> {
                           ),
                         ),
                       ],
+                      const SizedBox(height: 18),
+                      TextFormField(
+                        controller: _responsibleController,
+                        enabled: !_saving,
+                        textCapitalization: TextCapitalization.words,
+                        maxLength: 80,
+                        decoration: const InputDecoration(
+                          labelText: 'Responsável pela movimentação',
+                          prefixIcon: Icon(Icons.person_outline),
+                        ),
+                        validator: (value) {
+                          if ((value ?? '').trim().isEmpty) {
+                            return 'Informe quem realizou a movimentação.';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 18),
+                      TextFormField(
+                        controller: _referenceController,
+                        enabled: !_saving,
+                        maxLength: 100,
+                        decoration: const InputDecoration(
+                          labelText: 'Referência da operação (opcional)',
+                          hintText:
+                              'Nota fiscal, pedido, cliente ou fornecedor',
+                          prefixIcon: Icon(Icons.tag_outlined),
+                        ),
+                      ),
                       const SizedBox(height: 18),
                       _MovementItemsEditor(
                         items: _items,
@@ -2392,6 +2897,9 @@ class _MovementFormDialogState extends State<_MovementFormDialog> {
         ],
         type: _type,
         userId: widget.userId,
+        userEmail: widget.userEmail,
+        responsibleName: _responsibleController.text.trim(),
+        operationReference: _referenceController.text.trim(),
         reason: _reasonController.text.trim(),
       );
       if (mounted) Navigator.of(context).pop(true);
@@ -2865,12 +3373,15 @@ bool _matchesOperationFilter(
     _MovementFilter.all => true,
     _MovementFilter.inbound =>
       operation.type != StockMovementType.adjustment &&
+          operation.type != StockMovementType.reversal &&
           operation.increasesStock,
     _MovementFilter.outbound =>
       operation.type != StockMovementType.adjustment &&
+          operation.type != StockMovementType.reversal &&
           operation.decreasesStock,
     _MovementFilter.adjustments =>
       operation.type == StockMovementType.adjustment,
+    _MovementFilter.reversals => operation.type == StockMovementType.reversal,
   };
 }
 
@@ -2938,7 +3449,10 @@ int _operationSortGroup(
   _StockOperation operation, {
   required bool inboundFirst,
 }) {
-  if (operation.type == StockMovementType.adjustment) return 1;
+  if (operation.type == StockMovementType.adjustment ||
+      operation.type == StockMovementType.reversal) {
+    return 1;
+  }
   if (operation.increasesStock) return inboundFirst ? 0 : 2;
   return inboundFirst ? 2 : 0;
 }
@@ -2959,6 +3473,7 @@ List<StockMovementType> _movementTypesForFilter(_MovementFilter filter) {
       StockMovementType.other,
     ],
     _MovementFilter.adjustments => const [StockMovementType.adjustment],
+    _MovementFilter.reversals => const [StockMovementType.reversal],
   };
 }
 
@@ -3021,6 +3536,34 @@ String _operationDetail(_StockOperation operation) {
   return parts.isEmpty ? 'Sem detalhes' : parts.join(' - ');
 }
 
+String _operationResponsible(_StockOperation operation) {
+  final responsible = operation.responsibleName.trim();
+  return responsible.isEmpty ? 'Não informado' : responsible;
+}
+
+String _operationReferenceLabel(_StockOperation operation) {
+  final reference = operation.operationReference.trim();
+  return reference.isEmpty ? 'Não informada' : reference;
+}
+
+String _operationStatusLabel(_StockOperation operation) {
+  if (operation.isReversal) return 'Estorno';
+  if (operation.isReversed) return 'Estornada';
+  return _canReverseOperation(operation)
+      ? 'Ativa'
+      : 'Prazo de estorno encerrado';
+}
+
+bool _canReverseOperation(_StockOperation operation) {
+  if (operation.isReversal ||
+      operation.isReversed ||
+      operation.type == StockMovementType.reversal) {
+    return false;
+  }
+  final deadline = operation.occurredAt.add(const Duration(days: 7));
+  return !DateTime.now().isAfter(deadline);
+}
+
 String _operationItemCount(_StockOperation operation) {
   final count = operation.items.length;
   return count == 1 ? '1 produto' : '$count produtos';
@@ -3039,7 +3582,9 @@ String _operationProductSummary(
 }
 
 Color _movementColor(BuildContext context, StockMovement movement) {
+  if (movement.isReversed) return AppTheme.warning;
   if (movement.type == StockMovementType.adjustment) return AppTheme.aqua;
+  if (movement.type == StockMovementType.reversal) return AppTheme.warning;
   if (movement.increasesStock) return AppTheme.success;
   return Theme.of(context).colorScheme.error;
 }
@@ -3048,7 +3593,46 @@ IconData _movementIcon(StockMovement movement) {
   if (movement.type == StockMovementType.adjustment) {
     return Icons.tune_outlined;
   }
+  if (movement.type == StockMovementType.reversal) {
+    return Icons.undo_outlined;
+  }
   return movement.increasesStock ? Icons.arrow_upward : Icons.arrow_downward;
+}
+
+String _reversalErrorMessage(Object error) {
+  if (error is FirebaseException) {
+    return switch (error.code) {
+      'wrong-password' || 'invalid-credential' || 'invalid-login-credentials' =>
+        'Senha incorreta. Confira e tente novamente.',
+      'too-many-requests' =>
+        'Muitas tentativas. Aguarde alguns minutos e tente novamente.',
+      'network-request-failed' || 'unavailable' =>
+        'Sem conexão com o Firebase. Verifique sua internet e tente novamente.',
+      'permission-denied' =>
+        'Sua conta não tem permissão para estornar esta movimentação.',
+      'user-disabled' || 'user-not-found' =>
+        'Não foi possível confirmar a conta atual. Entre novamente no sistema.',
+      _ => 'Não foi possível concluir o estorno. Tente novamente.',
+    };
+  }
+
+  final message = error.toString().replaceFirst('Bad state: ', '');
+  if (message.contains('já foi estornada')) {
+    return 'Esta movimentação já foi estornada.';
+  }
+  if (message.contains('não pode ser estornada')) {
+    return 'Uma operação de estorno não pode ser estornada novamente.';
+  }
+  if (message.contains('prazo de 7 dias')) {
+    return 'O prazo de 7 dias para estornar esta movimentação foi encerrado.';
+  }
+  if (message.contains('estoque atual')) {
+    return 'O estoque atual não possui quantidade suficiente para desfazer esta entrada.';
+  }
+  if (message.contains('não encontrado')) {
+    return 'A movimentação ou um de seus produtos não está mais disponível.';
+  }
+  return 'Não foi possível concluir o estorno. Tente novamente.';
 }
 
 String _stockErrorMessage(Object error) {

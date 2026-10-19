@@ -56,10 +56,21 @@ class FirestoreStockMovementRepository implements StockMovementRepository {
       'occurredAt': Timestamp.fromDate(movement.occurredAt),
       'operationId': movement.operationId,
       'userId': movement.userId,
+      'userEmail': movement.userEmail,
+      'responsibleName': movement.responsibleName,
+      'operationReference': movement.operationReference,
       'reason': movement.reason,
       'note': movement.note,
       'sourceChannelId': movement.sourceChannelId,
       'stockAfter': movement.stockAfter,
+      'reversalOfOperationId': movement.reversalOfOperationId,
+      'reversalOperationId': movement.reversalOperationId,
+      'reversedAt': movement.reversedAt == null
+          ? null
+          : Timestamp.fromDate(movement.reversedAt!),
+      'reversedByUserId': movement.reversedByUserId,
+      'reversedByResponsibleName': movement.reversedByResponsibleName,
+      'reversalReason': movement.reversalReason,
     });
   }
 
@@ -79,16 +90,30 @@ class FirestoreStockMovementRepository implements StockMovementRepository {
       occurredAt: readDateTime(data['occurredAt']),
       operationId: _nullableString(data['operationId']),
       userId: _nullableString(data['userId']),
+      userEmail: readString(data, 'userEmail'),
+      responsibleName: readString(data, 'responsibleName'),
+      operationReference: readString(data, 'operationReference'),
       reason: readString(data, 'reason'),
       note: readString(data, 'note'),
       sourceChannelId: _nullableString(data['sourceChannelId']),
       stockAfter: data['stockAfter'] is num
           ? (data['stockAfter'] as num).toInt()
           : null,
+      reversalOfOperationId: _nullableString(data['reversalOfOperationId']),
+      reversalOperationId: _nullableString(data['reversalOperationId']),
+      reversedAt: _nullableDateTime(data['reversedAt']),
+      reversedByUserId: _nullableString(data['reversedByUserId']),
+      reversedByResponsibleName: readString(data, 'reversedByResponsibleName'),
+      reversalReason: readString(data, 'reversalReason'),
     );
   }
 
   String? _nullableString(Object? value) {
     return value is String && value.isNotEmpty ? value : null;
+  }
+
+  DateTime? _nullableDateTime(Object? value) {
+    if (value == null) return null;
+    return readDateTime(value);
   }
 }

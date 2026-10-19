@@ -59,6 +59,7 @@ class FirestoreCompanyRepository implements CompanyRepository {
         'createdAt': now,
         'updatedAt': now,
         'settings': <String, Object?>{},
+        'lastMovementNumber': 999,
       }, SetOptions(merge: true));
     }
     batch.update(userReference, {
@@ -93,7 +94,7 @@ class FirestoreCompanyRepository implements CompanyRepository {
       'createdAt': Timestamp.fromDate(company.createdAt),
       'updatedAt': Timestamp.fromDate(company.updatedAt),
       'settings': company.settings,
-    });
+    }, SetOptions(merge: true));
   }
 
   DocumentReference<Map<String, dynamic>> _document(String companyId) {

@@ -7,6 +7,7 @@ enum StockMovementType {
   ownUse,
   returnItem,
   gift,
+  reversal,
   other,
 }
 
@@ -21,6 +22,7 @@ extension StockMovementTypeX on StockMovementType {
       StockMovementType.ownUse => 'own_use',
       StockMovementType.returnItem => 'return',
       StockMovementType.gift => 'gift',
+      StockMovementType.reversal => 'reversal',
       StockMovementType.other => 'other',
     };
   }
@@ -35,6 +37,7 @@ extension StockMovementTypeX on StockMovementType {
       StockMovementType.ownUse => 'Uso próprio',
       StockMovementType.returnItem => 'Devolução',
       StockMovementType.gift => 'Brinde',
+      StockMovementType.reversal => 'Estorno',
       StockMovementType.other => 'Outro',
     };
   }
@@ -57,10 +60,19 @@ class StockMovement {
     required this.occurredAt,
     this.operationId,
     this.userId,
+    this.userEmail = '',
+    this.responsibleName = '',
+    this.operationReference = '',
     this.reason = '',
     this.note = '',
     this.sourceChannelId,
     this.stockAfter,
+    this.reversalOfOperationId,
+    this.reversalOperationId,
+    this.reversedAt,
+    this.reversedByUserId,
+    this.reversedByResponsibleName = '',
+    this.reversalReason = '',
   });
 
   final String id;
@@ -71,11 +83,22 @@ class StockMovement {
   final DateTime occurredAt;
   final String? operationId;
   final String? userId;
+  final String userEmail;
+  final String responsibleName;
+  final String operationReference;
   final String reason;
   final String note;
   final String? sourceChannelId;
   final int? stockAfter;
+  final String? reversalOfOperationId;
+  final String? reversalOperationId;
+  final DateTime? reversedAt;
+  final String? reversedByUserId;
+  final String reversedByResponsibleName;
+  final String reversalReason;
 
   bool get increasesStock => quantityDelta > 0;
   bool get decreasesStock => quantityDelta < 0;
+  bool get isReversal => reversalOfOperationId != null;
+  bool get isReversed => reversalOperationId != null;
 }
