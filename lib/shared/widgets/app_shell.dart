@@ -16,10 +16,10 @@ class AppShell extends ConsumerWidget {
 
   static const destinations = [
     AppDestination(
-      label: 'Dashboard',
+      label: 'Início',
       route: '/',
-      icon: Icons.dashboard_outlined,
-      selectedIcon: Icons.dashboard,
+      icon: Icons.home_outlined,
+      selectedIcon: Icons.home,
     ),
     AppDestination(
       label: 'Produtos',
@@ -40,10 +40,16 @@ class AppShell extends ConsumerWidget {
       selectedIcon: Icons.fact_check,
     ),
     AppDestination(
-      label: 'Preços',
+      label: 'Calculadora',
       route: '/pricing',
       icon: Icons.calculate_outlined,
       selectedIcon: Icons.calculate,
+    ),
+    AppDestination(
+      label: 'Dashboard',
+      route: '/dashboard',
+      icon: Icons.analytics_outlined,
+      selectedIcon: Icons.analytics,
     ),
     AppDestination(
       label: 'Configurações',

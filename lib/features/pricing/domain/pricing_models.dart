@@ -74,6 +74,20 @@ class PriceForProfitInput {
   final PricingPlatform platform;
 }
 
+class PriceForMarginInput {
+  const PriceForMarginInput({
+    required this.productCost,
+    required this.additionalCosts,
+    required this.desiredMargin,
+    required this.platform,
+  });
+
+  final double productCost;
+  final double additionalCosts;
+  final double desiredMargin;
+  final PricingPlatform platform;
+}
+
 class ProfitFromPriceInput {
   const ProfitFromPriceInput({
     required this.productCost,

@@ -48,6 +48,34 @@ void main() {
     expect(result.margin, closeTo(0.3266, 0.0001));
   });
 
+  test('calcula preço para margem desejada sobre o preço de venda', () {
+    final result = PricingCalculator.priceForTargetMargin(
+      const PriceForMarginInput(
+        productCost: 50,
+        additionalCosts: 4,
+        desiredMargin: 0.25,
+        platform: PricingPlatform(
+          id: 'canal',
+          companyId: 'company',
+          name: 'Canal de teste',
+          fees: [
+            PricingFee(
+              id: 'commission',
+              name: 'Comissão',
+              type: PricingFeeType.percentage,
+              value: 0.15,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    expect(result.salePrice, 90);
+    expect(result.percentageFees, 13.5);
+    expect(result.profit, 22.5);
+    expect(result.margin, 0.25);
+  });
+
   test('calcula preço mínimo para não ter prejuízo', () {
     final result = PricingCalculator.minimumPrice(
       productCost: 40,

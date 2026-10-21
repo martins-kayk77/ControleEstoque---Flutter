@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../features/auth/application/auth_state.dart';
 import '../../screens/tela_acesso.dart';
 import '../../screens/tela_configuracoes.dart';
+import '../../screens/tela_dashboard.dart';
 import '../../screens/tela_painel.dart';
 import '../../screens/tela_precos.dart';
 import '../../screens/tela_produtos.dart';
@@ -15,7 +16,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   late final GoRouter router;
 
   router = GoRouter(
-    initialLocation: DashboardPage.routePath,
+    initialLocation: HomePage.routePath,
     redirect: (context, state) {
       final authState = ref.read(authStateProvider);
       final authFlow = ref.read(authFlowProvider);
@@ -34,7 +35,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (isAuthenticated && isLoginRoute) {
         final from = state.uri.queryParameters['from'];
         return from == null || from.isEmpty
-            ? DashboardPage.routePath
+            ? HomePage.routePath
             : Uri.decodeComponent(from);
       }
 
@@ -47,9 +48,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         },
         routes: [
           GoRoute(
-            path: DashboardPage.routePath,
-            name: DashboardPage.routeName,
-            builder: (context, state) => const DashboardPage(),
+            path: HomePage.routePath,
+            name: HomePage.routeName,
+            builder: (context, state) => const HomePage(),
           ),
           GoRoute(
             path: ProductsPage.routePath,
@@ -70,6 +71,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: PricingPage.routePath,
             name: PricingPage.routeName,
             builder: (context, state) => const PricingPage(),
+          ),
+          GoRoute(
+            path: DashboardPage.routePath,
+            name: DashboardPage.routeName,
+            builder: (context, state) => const DashboardPage(),
           ),
           GoRoute(
             path: SettingsPage.routePath,

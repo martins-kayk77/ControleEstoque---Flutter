@@ -23,6 +23,33 @@ class PricingCalculator {
     );
   }
 
+  static PricingResult priceForTargetMargin(PriceForMarginInput input) {
+    _validateMoney('productCost', input.productCost);
+    _validateMoney('additionalCosts', input.additionalCosts);
+
+    final rate = _validateRate(input.platform.percentageRate);
+    final desiredMargin = _validateRate(input.desiredMargin);
+    final retainedRate = 1 - rate - desiredMargin;
+    if (retainedRate <= 0) {
+      throw ArgumentError.value(
+        input.desiredMargin,
+        'desiredMargin',
+        'A soma da margem desejada e das taxas deve ser menor que 100%.',
+      );
+    }
+
+    final baseCost =
+        input.productCost + input.additionalCosts + input.platform.fixedFees;
+    final salePrice = _ceilCurrency(baseCost / retainedRate);
+
+    return _buildResult(
+      salePrice: salePrice,
+      productCost: input.productCost,
+      additionalCosts: input.additionalCosts,
+      platform: input.platform,
+    );
+  }
+
   static PricingResult profitFromPrice(ProfitFromPriceInput input) {
     _validateMoney('productCost', input.productCost);
     _validateMoney('additionalCosts', input.additionalCosts);

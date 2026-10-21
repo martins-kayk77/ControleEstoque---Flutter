@@ -7,11 +7,11 @@ import '../app/bootstrap/firebase_bootstrap.dart';
 import '../app/theme/app_theme.dart';
 import '../shared/widgets/page_container.dart';
 
-class DashboardPage extends ConsumerWidget {
-  const DashboardPage({super.key});
+class HomePage extends ConsumerWidget {
+  const HomePage({super.key});
 
   static const routePath = '/';
-  static const routeName = 'dashboard';
+  static const routeName = 'home';
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -23,7 +23,7 @@ class DashboardPage extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           PageHeader(
-            title: 'Dashboard',
+            title: 'Painel',
             subtitle: 'Controle e leitura rápida do estoque',
             trailing: _FirebaseStatusChip(firebase),
           ),
