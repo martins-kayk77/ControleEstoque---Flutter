@@ -14,6 +14,7 @@ import '../features/inventory/data/product_repository.dart';
 import '../features/inventory/data/stock_movement_repository.dart';
 import '../features/inventory/domain/product.dart';
 import '../features/inventory/domain/stock_movement.dart';
+import '../features/inventory/presentation/stock_count_movement_reference.dart';
 import '../shared/widgets/page_container.dart';
 
 final stockMovementsProvider =
@@ -406,9 +407,10 @@ class _StockOperation {
   DateTime get occurredAt => reference.occurredAt;
   String get responsibleName => reference.responsibleName;
   String get userEmail => reference.userEmail;
-  String get operationReference => reference.operationReference;
+  String get operationReference => stockCountMovementReference(reference);
   String get reason => reference.reason;
-  String get note => reference.note;
+  String get note => stockCountMovementNote(reference);
+
   String? get reversalOfOperationId => reference.reversalOfOperationId;
   String? get reversalOperationId => reference.reversalOperationId;
   DateTime? get reversedAt => reference.reversedAt;
@@ -1486,7 +1488,6 @@ class _OperationTableRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final reference = _operationReferenceLabel(operation);
 
     return Material(
       color: expanded
@@ -1535,10 +1536,8 @@ class _OperationTableRow extends StatelessWidget {
               ),
               _FlexibleTableCell(
                 flex: 20,
-                child: Text(
-                  reference,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+                child: StockCountMovementReference(
+                  movement: operation.reference,
                   style: TextStyle(color: colorScheme.onSurfaceVariant),
                 ),
               ),
@@ -1697,6 +1696,7 @@ class _OperationAudit extends StatelessWidget {
             _AuditField(
               label: 'Referência',
               value: _operationReferenceLabel(operation),
+              child: StockCountMovementReference(movement: operation.reference),
             ),
             _AuditField(
               label: 'Status',
@@ -1755,11 +1755,13 @@ class _AuditField extends StatelessWidget {
     required this.label,
     required this.value,
     this.wide = false,
+    this.child,
   });
 
   final String label;
   final String value;
   final bool wide;
+  final Widget? child;
 
   @override
   Widget build(BuildContext context) {
@@ -1777,7 +1779,11 @@ class _AuditField extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 3),
-          SelectableText(value, style: Theme.of(context).textTheme.bodyMedium),
+          child ??
+              SelectableText(
+                value,
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
         ],
       ),
     );
@@ -1925,8 +1931,9 @@ class _OperationCardState extends State<_OperationCard> {
               ),
               if (operation.operationReference.trim().isNotEmpty) ...[
                 const SizedBox(height: 14),
-                Text(
-                  'Ref.: ${operation.operationReference.trim()}',
+                StockCountMovementReference(
+                  movement: operation.reference,
+                  prefix: 'Ref.: ',
                   style: TextStyle(color: colorScheme.onSurfaceVariant),
                 ),
               ],
@@ -3654,38 +3661,6 @@ String _stockErrorMessage(Object error) {
     return 'Este produto não está mais disponível.';
   }
   return 'Não foi possível registrar a movimentação. Tente novamente.';
-}
-
-class StockCountsPage extends StatelessWidget {
-  const StockCountsPage({super.key});
-
-  static const routePath = '/counts';
-  static const routeName = 'counts';
-
-  @override
-  Widget build(BuildContext context) {
-    return const InventoryPlaceholderPage(
-      title: 'Contagens',
-      subtitle: 'Conferência física semanal e divergências',
-      icon: Icons.fact_check_outlined,
-      actionIcon: Icons.playlist_add_check,
-      primaryActionLabel: 'Iniciar contagem',
-      accentColor: AppTheme.success,
-      stats: [
-        PlaceholderStat('Abertas', '0', Icons.pending_actions_outlined),
-        PlaceholderStat('Divergências', '0', Icons.report_problem_outlined),
-        PlaceholderStat('Finalizadas', '0', Icons.task_alt),
-      ],
-      emptyTitle: 'Sem contagens abertas',
-      emptyDescription:
-          'Ao finalizar uma contagem, diferenças poderão gerar ajustes de estoque automaticamente.',
-      nextSteps: [
-        'Escolher produtos que entram na contagem.',
-        'Informar quantidade esperada e encontrada.',
-        'Gerar ajuste quando existir divergência.',
-      ],
-    );
-  }
 }
 
 class InventoryPlaceholderPage extends StatelessWidget {

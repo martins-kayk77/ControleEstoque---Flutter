@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../features/auth/application/auth_state.dart';
 import '../../screens/tela_acesso.dart';
 import '../../screens/tela_configuracoes.dart';
+import '../../screens/tela_comparacao_contagens.dart';
+import '../../screens/tela_contagens.dart';
 import '../../screens/tela_dashboard.dart';
 import '../../screens/tela_painel.dart';
 import '../../screens/tela_precos.dart';
@@ -66,6 +68,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: StockCountsPage.routePath,
             name: StockCountsPage.routeName,
             builder: (context, state) => const StockCountsPage(),
+          ),
+          GoRoute(
+            path: StockCountComparisonPage.routePath,
+            name: StockCountComparisonPage.routeName,
+            builder: (context, state) => StockCountComparisonPage(
+              countId: state.pathParameters['countId']!,
+            ),
           ),
           GoRoute(
             path: PricingPage.routePath,

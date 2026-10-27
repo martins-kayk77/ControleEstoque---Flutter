@@ -70,7 +70,20 @@ service cloud.firestore {
     }
 
     match /companies/{companyId} {
-      allow read, update, delete: if isCompanyMember(companyId);
+      function validStockCountNumberUpdate() {
+        let previous = resource.data.get('lastStockCountNumber', 0);
+        let next = request.resource.data.get('lastStockCountNumber', 0);
+        let countId = request.resource.data.get('activeStockCountId', null);
+        return next == previous || (
+          next is int && next == previous + 1
+          && countId is string
+          && getAfter(/databases/$(database)/documents/companies/$(companyId)/stockCounts/$(countId)).data.number == next
+          && getAfter(/databases/$(database)/documents/companies/$(companyId)/stockCounts/$(countId)).data.startedAt == request.time
+        );
+      }
+
+      allow read, delete: if isCompanyMember(companyId);
+      allow update: if isCompanyMember(companyId) && validStockCountNumberUpdate();
       allow create: if signedIn()
         && request.resource.data.createdBy == request.auth.uid;
 
@@ -91,7 +104,45 @@ service cloud.firestore {
       }
 
       match /stockCounts/{stockCountId} {
-        allow read, write: if isCompanyMember(companyId);
+        allow read: if isCompanyMember(companyId);
+        allow create: if isCompanyMember(companyId)
+          && request.resource.data.companyId == companyId
+          && request.resource.data.status == 'inProgress'
+          && request.resource.data.responsibleUserId == request.auth.uid
+          && request.resource.data.startedAt == request.time
+          && request.resource.data.number is int
+          && request.resource.data.number > 0
+          && request.resource.data.number == getAfter(/databases/$(database)/documents/companies/$(companyId)).data.lastStockCountNumber
+          && request.resource.data.number == get(/databases/$(database)/documents/companies/$(companyId)).data.get('lastStockCountNumber', 0) + 1
+          && request.resource.data.items is list
+          && request.resource.data.items.size() > 0
+          && request.resource.data.items.size() <= 200;
+        allow update: if isCompanyMember(companyId)
+          && resource.data.status == 'inProgress'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'items', 'status', 'updatedAt', 'completedAt', 'completedByUserId', 'revision'
+          ])
+          && request.resource.data.status in ['inProgress', 'completed', 'canceled']
+          && request.resource.data.items is list
+          && request.resource.data.items.size() == resource.data.items.size()
+          && (request.resource.data.status != 'completed'
+            || (request.resource.data.completedAt == request.time
+              && request.resource.data.completedByUserId == request.auth.uid));
+        allow update: if isCompanyMember(companyId)
+          && resource.data.status == 'completed'
+          && resource.data.get('adjustedAt', null) == null
+          && (resource.data.get('operationId', null) == null
+            || resource.data.get('operationId', null) == '')
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'operationId', 'adjustedAt', 'adjustedByUserId', 'adjustedByName', 'updatedAt'
+          ])
+          && request.resource.data.operationId is string
+          && request.resource.data.operationId.size() > 0
+          && request.resource.data.adjustedAt == request.time
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.adjustedByUserId == request.auth.uid
+          && request.resource.data.adjustedByName is string;
+        allow delete: if false;
       }
 
       match /sales/{saleId} {

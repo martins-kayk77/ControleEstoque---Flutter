@@ -332,6 +332,10 @@ class InventoryService {
           'userEmail': userEmail.trim(),
           'responsibleName': normalizedResponsible,
           'operationReference': data['operationReference'] ?? '',
+          if (data['stockCountId'] != null)
+            'stockCountId': data['stockCountId'],
+          if (data['stockCountNumber'] != null)
+            'stockCountNumber': data['stockCountNumber'],
           'reason': normalizedReason,
           'note': 'Estorno da operação $operationId.',
           'sourceChannelId': null,

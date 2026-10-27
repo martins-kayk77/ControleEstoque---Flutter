@@ -61,6 +61,9 @@ class FirestoreStockMovementRepository implements StockMovementRepository {
       'operationReference': movement.operationReference,
       'reason': movement.reason,
       'note': movement.note,
+      if (movement.stockCountId != null) 'stockCountId': movement.stockCountId,
+      if (movement.stockCountNumber != null)
+        'stockCountNumber': movement.stockCountNumber,
       'sourceChannelId': movement.sourceChannelId,
       'stockAfter': movement.stockAfter,
       'reversalOfOperationId': movement.reversalOfOperationId,
@@ -95,6 +98,10 @@ class FirestoreStockMovementRepository implements StockMovementRepository {
       operationReference: readString(data, 'operationReference'),
       reason: readString(data, 'reason'),
       note: readString(data, 'note'),
+      stockCountId: _nullableString(data['stockCountId']),
+      stockCountNumber: data['stockCountNumber'] is num
+          ? (data['stockCountNumber'] as num).toInt()
+          : null,
       sourceChannelId: _nullableString(data['sourceChannelId']),
       stockAfter: data['stockAfter'] is num
           ? (data['stockAfter'] as num).toInt()

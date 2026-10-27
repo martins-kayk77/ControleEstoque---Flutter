@@ -65,6 +65,8 @@ class StockMovement {
     this.operationReference = '',
     this.reason = '',
     this.note = '',
+    this.stockCountId,
+    this.stockCountNumber,
     this.sourceChannelId,
     this.stockAfter,
     this.reversalOfOperationId,
@@ -88,6 +90,8 @@ class StockMovement {
   final String operationReference;
   final String reason;
   final String note;
+  final String? stockCountId;
+  final int? stockCountNumber;
   final String? sourceChannelId;
   final int? stockAfter;
   final String? reversalOfOperationId;
@@ -101,4 +105,8 @@ class StockMovement {
   bool get decreasesStock => quantityDelta < 0;
   bool get isReversal => reversalOfOperationId != null;
   bool get isReversed => reversalOperationId != null;
+
+  String? get stockCountCode => stockCountNumber == null
+      ? null
+      : 'CT-${stockCountNumber.toString().padLeft(4, '0')}';
 }
