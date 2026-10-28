@@ -51,19 +51,27 @@ class CountDifferenceBadge extends StatelessWidget {
 
 Future<void> showStockCountReport(
   BuildContext context,
-  StockCount count,
-) async {
+  StockCount count, {
+  bool allowComparison = false,
+}) async {
   final compare = await showDialog<bool>(
     context: context,
-    builder: (context) => _StockCountReportDialog(initialCount: count),
+    builder: (context) => _StockCountReportDialog(
+      initialCount: count,
+      allowComparison: allowComparison,
+    ),
   );
-  if (compare != true || !context.mounted) return;
+  if (!allowComparison || compare != true || !context.mounted) return;
   await context.push('/counts/${Uri.encodeComponent(count.id)}/compare');
 }
 
 class _StockCountReportDialog extends ConsumerStatefulWidget {
-  const _StockCountReportDialog({required this.initialCount});
+  const _StockCountReportDialog({
+    required this.initialCount,
+    required this.allowComparison,
+  });
   final StockCount initialCount;
+  final bool allowComparison;
   @override
   ConsumerState<_StockCountReportDialog> createState() =>
       _StockCountReportDialogState();
@@ -200,16 +208,17 @@ class _StockCountReportDialogState
                     spacing: 12,
                     runSpacing: 10,
                     children: [
-                      OutlinedButton.icon(
-                        onPressed:
-                            _busy ||
-                                user == null ||
-                                count.status != StockCountStatus.completed
-                            ? null
-                            : () => Navigator.pop(context, true),
-                        icon: const Icon(Icons.compare_arrows),
-                        label: const Text('Comparar'),
-                      ),
+                      if (widget.allowComparison)
+                        OutlinedButton.icon(
+                          onPressed:
+                              _busy ||
+                                  user == null ||
+                                  count.status != StockCountStatus.completed
+                              ? null
+                              : () => Navigator.pop(context, true),
+                          icon: const Icon(Icons.compare_arrows),
+                          label: const Text('Comparar'),
+                        ),
                       if (!adjusted && count.divergentItems > 0)
                         FilledButton.icon(
                           onPressed: _busy || user == null
@@ -381,7 +390,9 @@ class _CountAdjustmentPasswordDialogState
                     labelText: 'Senha',
                     prefixIcon: const Icon(Icons.lock_outline),
                     suffixIcon: IconButton(
-                      tooltip: _obscurePassword ? 'Mostrar senha' : 'Ocultar senha',
+                      tooltip: _obscurePassword
+                          ? 'Mostrar senha'
+                          : 'Ocultar senha',
                       onPressed: _submitting
                           ? null
                           : () => setState(
@@ -394,8 +405,9 @@ class _CountAdjustmentPasswordDialogState
                       ),
                     ),
                   ),
-                  validator: (value) =>
-                      value == null || value.isEmpty ? 'Informe sua senha.' : null,
+                  validator: (value) => value == null || value.isEmpty
+                      ? 'Informe sua senha.'
+                      : null,
                   onFieldSubmitted: (_) => _submit(),
                 ),
               ],

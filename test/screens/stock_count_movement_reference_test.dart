@@ -1,27 +1,7 @@
-import 'dart:async';
-
-import 'package:controle_estoque/features/auth/application/auth_state.dart';
-import 'package:controle_estoque/features/inventory/data/stock_count_repository.dart';
-import 'package:controle_estoque/features/inventory/domain/stock_count.dart';
 import 'package:controle_estoque/features/inventory/domain/stock_movement.dart';
 import 'package:controle_estoque/features/inventory/presentation/stock_count_movement_reference.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-class _CountRepository extends Fake implements StockCountRepository {
-  final result = Completer<StockCount?>();
-  final lookups = <(String, String)>[];
-
-  @override
-  Future<StockCount?> findById(String companyId, String countId) {
-    lookups.add((companyId, countId));
-    return result.future;
-  }
-
-  @override
-  Stream<List<StockCount>> watchCounts(String companyId) => Stream.value([]);
-}
 
 StockMovement _movement({
   String? countId = 'saved-count',
@@ -79,84 +59,29 @@ void main() {
     expect(stockCountMovementNote(customized), 'Ajuste revisado pela equipe.');
   });
 
-  Future<void> mount(WidgetTester tester, _CountRepository repository) async {
-    await tester.pumpWidget(
-      ProviderScope(
-        overrides: [
-          stockCountRepositoryProvider.overrideWithValue(repository),
-          authStateProvider.overrideWith((ref) => Stream.value(null)),
-        ],
-        child: MaterialApp(
+  testWidgets(
+    'referência deixa o clique abrir a movimentação sem prévia do relatório',
+    (tester) async {
+      var openedMovement = false;
+      await tester.pumpWidget(
+        MaterialApp(
           home: Scaffold(
-            body: StockCountMovementReference(movement: _movement()),
+            body: InkWell(
+              onTap: () => openedMovement = true,
+              child: StockCountMovementReference(movement: _movement()),
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-  }
-
-  testWidgets('link consulta empresa correta, carrega e abre relatório', (
-    tester,
-  ) async {
-    final repository = _CountRepository();
-    await mount(tester, repository);
-    expect(repository.lookups, isEmpty);
-    await tester.tap(find.text('Contagem CT-0007'));
-    await tester.pump();
-    expect(repository.lookups, [('company', 'saved-count')]);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    repository.result.complete(
-      StockCount(
-        id: 'saved-count',
-        companyId: 'company',
-        number: 7,
-        startedAt: DateTime(2026, 10, 22),
-        status: StockCountStatus.completed,
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.text('Relatório de contagem CT-0007'), findsOneWidget);
-    expect(find.textContaining('saved-count'), findsNothing);
-    await tester.tap(find.byTooltip('Fechar'));
-    await tester.pumpAndSettle();
-    expect(find.byType(CircularProgressIndicator), findsNothing);
-  });
-
-  testWidgets('ausência de relatório informa usuário sem expor ID', (
-    tester,
-  ) async {
-    final repository = _CountRepository();
-    await mount(tester, repository);
-    await tester.tap(find.text('Contagem CT-0007'));
-    repository.result.complete(null);
-    await tester.pumpAndSettle();
-    expect(
-      find.text('O relatório desta contagem não foi encontrado.'),
-      findsOneWidget,
-    );
-    expect(find.textContaining('saved-count'), findsNothing);
-    expect(find.byType(CircularProgressIndicator), findsNothing);
-  });
-
-  testWidgets('falha de consulta informa usuário e libera tentativa', (
-    tester,
-  ) async {
-    final repository = _CountRepository();
-    await mount(tester, repository);
-    await tester.tap(find.text('Contagem CT-0007'));
-    repository.result.completeError(
-      StateError('internal technical identifier'),
-    );
-    await tester.pumpAndSettle();
-    expect(
-      find.text('Não foi possível abrir o relatório. Tente novamente.'),
-      findsOneWidget,
-    );
-    expect(find.textContaining('technical identifier'), findsNothing);
-    expect(
-      tester.widget<TextButton>(find.byType(TextButton)).onPressed,
-      isNotNull,
-    );
-  });
+      );
+      expect(find.text('Contagem CT-0007'), findsOneWidget);
+      expect(find.byType(TextButton), findsNothing);
+      await tester.tap(find.text('Contagem CT-0007'));
+      await tester.pumpAndSettle();
+      expect(openedMovement, isTrue);
+      expect(find.byType(Dialog), findsNothing);
+      expect(find.text('Relatório de contagem CT-0007'), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

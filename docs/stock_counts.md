@@ -36,8 +36,9 @@ identificados por data, sem migração automática ou alteração dos dados hist
 
 O código aparece no histórico, busca, comparação, contagem aberta e título do
 relatório. Ajustes guardam `stockCountId` e `stockCountNumber`; a referência
-`Contagem CT-0001` abre o relatório pela identificação interna, independentemente
-do texto exibido. Os estornos preservam esse vínculo. Referências e observações
+`Contagem CT-0001` aparece apenas como texto nas movimentações, sem abrir uma
+prévia do relatório. Os produtos são consultados nos detalhes da própria operação.
+Os estornos preservam esse vínculo. Referências e observações
 manuais não são convertidas em referências de contagem.
 
 Os documentos ficam no caminho existente `companies/{companyId}/stockCounts`.
@@ -82,7 +83,8 @@ por data/responsável e exibição progressiva. Os detalhes são lidos do snapsh
 sem depender de produtos que possam ter sido renomeados ou removidos depois.
 
 A comparação é acessada pelo botão **Comparar** dentro de **Ver relatório**,
-na rota `/counts/{countId}/compare`. O relatório aberto permanece como origem;
+exclusivamente quando aberto pelo histórico da tela de contagens.
+A rota é `/counts/{countId}/compare`. O relatório aberto permanece como origem;
 o usuário escolhe o segundo relatório, sem poder compará-lo consigo mesmo.
 A tela organiza os dois cronologicamente, mesmo quando o relatório aberto é o
 mais recente, e oferece retorno à tela anterior (ou ao histórico no acesso direto).

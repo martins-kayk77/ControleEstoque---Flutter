@@ -491,7 +491,9 @@ Future<void> _exerciseAdjustmentAuthorization(
     expect(db.documents['companies/c/products/a']!['currentStock'], 20);
     expect(storedCount().stockAdjusted, isFalse);
     expect(
-      db.documents.keys.where((path) => path.startsWith('companies/c/movements/')),
+      db.documents.keys.where(
+        (path) => path.startsWith('companies/c/movements/'),
+      ),
       isEmpty,
     );
   }
@@ -548,17 +550,21 @@ Future<void> _exerciseAdjustmentAuthorization(
   expect(authRepository.attempts, 0);
   expectUnchanged();
   final password = find.byType(TextFormField);
-  expect(tester.widget<TextFormField>(password).obscureText, isTrue);
+  final passwordInput = find.descendant(
+    of: password,
+    matching: find.byType(TextField),
+  );
+  expect(tester.widget<TextField>(passwordInput).obscureText, isTrue);
   await tester.tap(find.text('Aplicar ajuste'));
   await tester.pumpAndSettle();
   expect(find.text('Informe sua senha.'), findsOneWidget);
   expect(authRepository.attempts, 0);
   await tester.tap(find.byTooltip('Mostrar senha'));
   await tester.pumpAndSettle();
-  expect(tester.widget<TextFormField>(password).obscureText, isFalse);
+  expect(tester.widget<TextField>(passwordInput).obscureText, isFalse);
   await tester.tap(find.byTooltip('Ocultar senha'));
   await tester.pumpAndSettle();
-  expect(tester.widget<TextFormField>(password).obscureText, isTrue);
+  expect(tester.widget<TextField>(passwordInput).obscureText, isTrue);
   await tester.enterText(password, 'senha incorreta');
   await tester.tap(find.text('Aplicar ajuste'));
   await tester.pumpAndSettle();
@@ -588,13 +594,17 @@ Future<void> _exerciseAdjustmentAuthorization(
   expect(authRepository.attempts, 2);
   expect(tester.widget<TextFormField>(password).enabled, isFalse);
   expect(
-    tester.widget<TextButton>(find.widgetWithText(TextButton, 'Cancelar')).onPressed,
+    tester
+        .widget<TextButton>(find.widgetWithText(TextButton, 'Cancelar'))
+        .onPressed,
     isNull,
   );
   expect(
-    tester.widget<FilledButton>(
-      find.widgetWithText(FilledButton, 'Ajustando estoque…'),
-    ).onPressed,
+    tester
+        .widget<FilledButton>(
+          find.widgetWithText(FilledButton, 'Ajustando estoque…'),
+        )
+        .onPressed,
     isNull,
   );
   expectUnchanged();
@@ -607,7 +617,9 @@ Future<void> _exerciseAdjustmentAuthorization(
   expect(storedCount().stockAdjusted, isTrue);
   expect(storedCount().adjustedByUserId, 'u');
   expect(
-    db.documents.keys.where((path) => path.startsWith('companies/c/movements/')),
+    db.documents.keys.where(
+      (path) => path.startsWith('companies/c/movements/'),
+    ),
     hasLength(1),
   );
   expect(tester.takeException(), isNull);

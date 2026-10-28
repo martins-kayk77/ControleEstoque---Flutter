@@ -975,7 +975,8 @@ class _ReportTile extends StatelessWidget {
           ],
         ),
         OutlinedButton.icon(
-          onPressed: () => showStockCountReport(context, report),
+          onPressed: () =>
+              showStockCountReport(context, report, allowComparison: true),
           icon: const Icon(Icons.description_outlined),
           label: const Text('Ver relatório'),
         ),
